@@ -1,0 +1,28 @@
+[package]
+name = "projet-rust"
+version = "0.1.0"
+edition = "2021"
+authors = ["Equipe EFREI M2 - Dev1"]
+description = "Resource Collection Simulation - robots autonomes (Ratatui)"
+
+[dependencies]
+# Rendu terminal
+ratatui = "0.28"
+crossterm = "0.28"
+
+# Génération procédurale
+noise = "0.9"
+rand = "0.8"
+
+# Concurrence
+crossbeam-channel = "0.5"
+
+# Navigation
+pathfinding = "4.11"
+
+# Erreurs
+anyhow = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
