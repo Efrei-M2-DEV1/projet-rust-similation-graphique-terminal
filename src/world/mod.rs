@@ -8,8 +8,10 @@ pub mod resource;
 pub mod tile;
 pub mod map;
 pub mod generator;
+pub mod populate;
 
 pub use generator::GenParams;
 pub use map::Map;
+pub use populate::PopulateParams;
 pub use resource::{Resource, ResourceKind};
 pub use tile::Tile;
