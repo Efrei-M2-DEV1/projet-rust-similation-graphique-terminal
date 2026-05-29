@@ -6,6 +6,8 @@
 
 pub mod resource;
 pub mod tile;
+pub mod map;
 
+pub use map::Map;
 pub use resource::{Resource, ResourceKind};
 pub use tile::Tile;
