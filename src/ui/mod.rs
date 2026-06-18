@@ -14,47 +14,111 @@ use crate::utils::Position;
 use crate::world::{ResourceKind, Tile};
 
 pub fn render(frame: &mut Frame<'_>, app: &App) {
+    let area = frame.area();
+
+    // Sécurité UX :
+    // Ratatui dessine dans la taille actuelle du terminal.
+    // Si la fenêtre est trop petite, la carte et le panneau latéral deviennent illisibles.
+    // On affiche donc un message clair au lieu d'un rendu cassé.
+    if area.width < 100 || area.height < 28 {
+        render_terminal_too_small(frame, app);
+        return;
+    }
+
+    // Layout principal :
+    // - grande zone à gauche : carte de simulation
+    // - colonne à droite : état, légende, aide
     let root = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(10), Constraint::Length(34)])
-        .split(frame.area());
+        .constraints([
+            Constraint::Min(60),     // carte
+            Constraint::Length(38),  // panneau latéral
+        ])
+        .split(area);
 
     let map_area = root[0];
     let side_area = root[1];
 
+    // Découpage du panneau latéral.
+    // On donne plus de hauteur à l'état car il contient les compteurs.
     let side_split = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(10), Constraint::Length(10), Constraint::Min(5)])
+        .constraints([
+            Constraint::Length(12), // Mission Control
+            Constraint::Length(10), // Légende
+            Constraint::Min(6),     // Aide
+        ])
         .split(side_area);
 
     let map_widget = Paragraph::new(Text::from(render_map_lines(app))).block(
         Block::default()
-            .title("Carte")
-            .borders(Borders::ALL),
+            .title(" Mars Resource Map ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::LightCyan)),
     );
 
     let stats_widget = Paragraph::new(Text::from(stats_lines(app))).block(
         Block::default()
-            .title("Etat")
-            .borders(Borders::ALL),
+            .title(" Mission Control ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::LightGreen)),
     );
 
     let legend_widget = Paragraph::new(Text::from(legend_lines())).block(
         Block::default()
-            .title("Legende")
-            .borders(Borders::ALL),
+            .title(" Legend ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Gray)),
     );
 
     let help_widget = Paragraph::new(Text::from(help_lines(app))).block(
         Block::default()
-            .title("Aide")
-            .borders(Borders::ALL),
+            .title(" Help ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray)),
     );
 
     frame.render_widget(map_widget, map_area);
     frame.render_widget(stats_widget, side_split[0]);
     frame.render_widget(legend_widget, side_split[1]);
     frame.render_widget(help_widget, side_split[2]);
+}
+
+fn render_terminal_too_small(frame: &mut Frame<'_>, app: &App) {
+    let area = frame.area();
+
+    let warning = Paragraph::new(Text::from(vec![
+        Line::from(vec![
+            Span::styled(
+                "Terminal trop petit",
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+        Line::from("Agrandis la fenêtre pour afficher correctement la simulation."),
+        Line::from(""),
+        Line::from(format!(
+            "Taille actuelle : {} colonnes x {} lignes",
+            area.width, area.height
+        )),
+        Line::from("Taille recommandée : au moins 100 colonnes x 28 lignes"),
+        Line::from(""),
+        Line::from(format!(
+            "Carte du projet : {} x {}",
+            app.map.width(),
+            app.map.height()
+        )),
+    ]))
+    .block(
+        Block::default()
+            .title(" Mars Resource Ops ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::LightRed)),
+    );
+
+    frame.render_widget(warning, area);
 }
 
 fn render_map_lines(app: &App) -> Vec<Line<'static>> {
@@ -209,40 +273,44 @@ fn legend_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(vec![
             Span::styled("O", Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)),
-            Span::raw(" obstacle"),
+            Span::raw("  obstacle infranchissable"),
         ]),
         Line::from(vec![
             Span::styled("E", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw(" energie"),
+            Span::raw("  source d'energie"),
         ]),
         Line::from(vec![
             Span::styled("C", Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD)),
-            Span::raw(" cristal"),
+            Span::raw("  depot de cristal"),
         ]),
         Line::from(vec![
             Span::styled("#", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
-            Span::raw(" base"),
+            Span::raw("  base centrale"),
         ]),
         Line::from(vec![
             Span::styled("x", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw(" eclaireur"),
+            Span::raw("  scout"),
         ]),
         Line::from(vec![
             Span::styled("o", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-            Span::raw(" collecteur"),
+            Span::raw("  collector"),
         ]),
     ]
 }
 
 fn help_lines(app: &App) -> Vec<Line<'static>> {
     vec![
-        Line::from("Appuyer sur n'importe quelle touche"),
-        Line::from("pour quitter"),
+        Line::from(vec![
+            Span::styled("Quitter: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw("appuyer sur une touche"),
+        ]),
         Line::from(""),
-        Line::from(format!(
-            "Carte: {} x {}",
-            app.map.width(),
-            app.map.height()
-        )),
+        Line::from(vec![
+            Span::styled("Carte: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(format!("{} x {}", app.map.width(), app.map.height())),
+        ]),
+        Line::from(""),
+        Line::from("Les scouts explorent et partagent."),
+        Line::from("Les collectors collectent puis rentrent."),
     ]
 }
