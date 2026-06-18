@@ -1,7 +1,18 @@
 //! Rendu Ratatui.
 //!
 //! Cette couche ne modifie aucun état.
-//! Elle transforme un SimulationSnapshot en interface terminal.
+//! Elle transforme un `SimulationSnapshot` en interface terminal.
+//!
+//! Important pour l'architecture :
+//! - l'UI ne pilote pas les robots ;
+//! - l'UI ne modifie pas la carte ;
+//! - l'UI affiche seulement le dernier snapshot reçu.
+//!
+//! Cette version ajoute un "wow effect" utile :
+//! - barres de progression énergie/cristaux ;
+//! - panneau Robot Fleet ;
+//! - Event Log plus lisible ;
+//! - légende intégrée.
 
 use std::collections::HashSet;
 
@@ -16,16 +27,27 @@ use crate::simulation::{ResourceView, SimulationSnapshot};
 use crate::utils::Position;
 use crate::world::ResourceKind;
 
+const PROGRESS_BAR_WIDTH: usize = 18;
+
 pub fn render_loading(frame: &mut Frame<'_>) {
     let area = frame.area();
 
-    let widget = Paragraph::new("Demarrage de la simulation concurrente...")
-        .block(
-            Block::default()
-                .title(" Mars Resource Ops ")
-                .borders(Borders::ALL),
-        )
-        .style(Style::default().fg(Color::LightGreen));
+    let widget = Paragraph::new(Text::from(vec![
+        Line::from(vec![Span::styled(
+            "Demarrage de la simulation concurrente...",
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from("Initialisation des threads robots, du hub et des channels."),
+    ]))
+    .block(
+        Block::default()
+            .title(" Mars Resource Ops ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::LightGreen)),
+    );
 
     frame.render_widget(widget, area);
 }
@@ -40,7 +62,7 @@ pub fn render(frame: &mut Frame<'_>, snapshot: &SimulationSnapshot) {
 
     let root = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(70), Constraint::Length(42)])
+        .constraints([Constraint::Min(70), Constraint::Length(46)])
         .split(area);
 
     let map_area = root[0];
@@ -49,39 +71,33 @@ pub fn render(frame: &mut Frame<'_>, snapshot: &SimulationSnapshot) {
     let side_split = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(12),
-            Constraint::Length(9),
-            Constraint::Length(6),
+            Constraint::Length(14),
+            Constraint::Length(8),
             Constraint::Min(8),
         ])
         .split(side_area);
 
     let map_widget = Paragraph::new(Text::from(render_map_lines(snapshot))).block(
         Block::default()
-            .title(" Mars Resource Map ")
+            .title(
+                " Mars Resource Map  |  x scouts  o collectors  # base  |  Press any key to quit ",
+            )
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::LightCyan)),
     );
 
-    let stats_widget = Paragraph::new(Text::from(stats_lines(snapshot))).block(
+    let mission_widget = Paragraph::new(Text::from(mission_control_lines(snapshot))).block(
         Block::default()
             .title(" Mission Control ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::LightGreen)),
     );
 
-    let legend_widget = Paragraph::new(Text::from(legend_lines())).block(
+    let fleet_widget = Paragraph::new(Text::from(robot_fleet_lines(snapshot))).block(
         Block::default()
-            .title(" Legend ")
+            .title(" Robot Fleet ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Gray)),
-    );
-
-    let help_widget = Paragraph::new(Text::from(help_lines(snapshot))).block(
-        Block::default()
-            .title(" Help ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray)),
+            .border_style(Style::default().fg(Color::Magenta)),
     );
 
     let event_widget = Paragraph::new(Text::from(event_lines(snapshot))).block(
@@ -92,10 +108,9 @@ pub fn render(frame: &mut Frame<'_>, snapshot: &SimulationSnapshot) {
     );
 
     frame.render_widget(map_widget, map_area);
-    frame.render_widget(stats_widget, side_split[0]);
-    frame.render_widget(legend_widget, side_split[1]);
-    frame.render_widget(help_widget, side_split[2]);
-    frame.render_widget(event_widget, side_split[3]);
+    frame.render_widget(mission_widget, side_split[0]);
+    frame.render_widget(fleet_widget, side_split[1]);
+    frame.render_widget(event_widget, side_split[2]);
 }
 
 fn render_terminal_too_small(frame: &mut Frame<'_>, snapshot: &SimulationSnapshot) {
@@ -222,11 +237,17 @@ fn empty_span() -> Span<'static> {
     Span::styled(".", Style::default().fg(Color::DarkGray))
 }
 
-fn stats_lines(snapshot: &SimulationSnapshot) -> Vec<Line<'static>> {
+fn mission_control_lines(snapshot: &SimulationSnapshot) -> Vec<Line<'static>> {
     let spinner = ["|", "/", "-", "\\"][(snapshot.tick as usize) % 4];
 
     let remaining_energy = sum_remaining(snapshot, ResourceKind::Energy);
     let remaining_crystals = sum_remaining(snapshot, ResourceKind::Crystal);
+
+    let total_energy = snapshot.collected_energy + remaining_energy;
+    let total_crystals = snapshot.collected_crystals + remaining_crystals;
+
+    let energy_percent = percent(snapshot.collected_energy, total_energy);
+    let crystal_percent = percent(snapshot.collected_crystals, total_crystals);
 
     let scouts = snapshot
         .robots
@@ -243,7 +264,10 @@ fn stats_lines(snapshot: &SimulationSnapshot) -> Vec<Line<'static>> {
     vec![
         Line::from(vec![
             Span::styled("Etat: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(format!("Simulation concurrente {}", spinner)),
+            Span::styled(
+                format!("Simulation concurrente {spinner}"),
+                Style::default().fg(Color::LightGreen),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Tick: ", Style::default().add_modifier(Modifier::BOLD)),
@@ -251,22 +275,29 @@ fn stats_lines(snapshot: &SimulationSnapshot) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Energie: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled("Energie  ", Style::default().fg(Color::Green)),
             Span::raw(format!(
-                "{} collectees / {} restantes",
-                snapshot.collected_energy, remaining_energy
+                "{} / {}  {}%",
+                snapshot.collected_energy, total_energy, energy_percent
             )),
         ]),
+        progress_line(snapshot.collected_energy, total_energy, Color::Green),
         Line::from(vec![
-            Span::styled("Cristaux: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled("Cristaux ", Style::default().fg(Color::LightMagenta)),
             Span::raw(format!(
-                "{} collectes / {} restants",
-                snapshot.collected_crystals, remaining_crystals
+                "{} / {}  {}%",
+                snapshot.collected_crystals, total_crystals, crystal_percent
             )),
         ]),
+        progress_line(
+            snapshot.collected_crystals,
+            total_crystals,
+            Color::LightMagenta,
+        ),
+        Line::from(""),
         Line::from(vec![
             Span::styled("Robots: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(format!("{} scouts / {} collectors", scouts, collectors)),
+            Span::raw(format!("{scouts} scouts / {collectors} collectors")),
         ]),
         Line::from(vec![
             Span::styled("Connues: ", Style::default().add_modifier(Modifier::BOLD)),
@@ -275,89 +306,83 @@ fn stats_lines(snapshot: &SimulationSnapshot) -> Vec<Line<'static>> {
                 snapshot.known_resources, snapshot.known_obstacles
             )),
         ]),
-    ]
-}
-
-fn sum_remaining(snapshot: &SimulationSnapshot, kind: ResourceKind) -> u32 {
-    snapshot
-        .resources
-        .iter()
-        .filter(|resource| resource.kind == kind)
-        .map(|resource| resource.quantity)
-        .sum()
-}
-
-fn legend_lines() -> Vec<Line<'static>> {
-    vec![
         Line::from(vec![
-            Span::styled(
-                "O",
-                Style::default()
-                    .fg(Color::LightCyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  obstacle"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "E",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  energie"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "C",
-                Style::default()
-                    .fg(Color::LightMagenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  cristal"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "#",
-                Style::default()
-                    .fg(Color::LightGreen)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  base"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "x",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  scout"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "o",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  collector"),
+            Span::styled("Legende: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled("O", Style::default().fg(Color::LightCyan)),
+            Span::raw(" obstacle  "),
+            Span::styled("E", Style::default().fg(Color::Green)),
+            Span::raw(" energie  "),
+            Span::styled("C", Style::default().fg(Color::LightMagenta)),
+            Span::raw(" cristal"),
         ]),
     ]
 }
 
-fn help_lines(snapshot: &SimulationSnapshot) -> Vec<Line<'static>> {
-    vec![
-        Line::from(vec![
-            Span::styled("Quitter: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw("une touche"),
-        ]),
-        Line::from(vec![
-            Span::styled("Carte: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(format!("{} x {}", snapshot.width, snapshot.height)),
-        ]),
-        Line::from(""),
-        Line::from("Scouts: explorent et partagent."),
-        Line::from("Collectors: collectent et deposent."),
-    ]
+fn progress_line(value: u32, total: u32, color: Color) -> Line<'static> {
+    let filled = if total == 0 {
+        0
+    } else {
+        ((value as f64 / total as f64) * PROGRESS_BAR_WIDTH as f64).round() as usize
+    }
+    .min(PROGRESS_BAR_WIDTH);
+
+    let empty = PROGRESS_BAR_WIDTH.saturating_sub(filled);
+
+    Line::from(vec![
+        Span::raw("["),
+        Span::styled(
+            "█".repeat(filled),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("░".repeat(empty), Style::default().fg(Color::DarkGray)),
+        Span::raw("]"),
+    ])
+}
+
+fn robot_fleet_lines(snapshot: &SimulationSnapshot) -> Vec<Line<'static>> {
+    let mut robots = snapshot.robots.clone();
+    robots.sort_by_key(|robot| robot.id);
+
+    let mut lines = Vec::new();
+
+    for pair in robots.chunks(2) {
+        let left = robot_short_label(&pair[0]);
+
+        if let Some(right_robot) = pair.get(1) {
+            let right = robot_short_label(right_robot);
+
+            lines.push(Line::from(vec![left, Span::raw("   "), right]));
+        } else {
+            lines.push(Line::from(vec![left]));
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from("Aucun robot actif."));
+    }
+
+    lines
+}
+
+fn robot_short_label(robot: &crate::robots::RobotSnapshot) -> Span<'static> {
+    let kind = match robot.kind {
+        RobotKind::Scout => "S",
+        RobotKind::Collector => "C",
+    };
+
+    let cargo = robot
+        .cargo
+        .map(|cargo| format!(" {}{}", resource_short_label(cargo.kind), cargo.amount))
+        .unwrap_or_default();
+
+    let label = format!("R{} {} {:>9}{}", robot.id.0, kind, robot.state, cargo);
+
+    let color = match robot.kind {
+        RobotKind::Scout => Color::Red,
+        RobotKind::Collector => Color::Magenta,
+    };
+
+    Span::styled(label, Style::default().fg(color))
 }
 
 fn event_lines(snapshot: &SimulationSnapshot) -> Vec<Line<'static>> {
@@ -370,10 +395,52 @@ fn event_lines(snapshot: &SimulationSnapshot) -> Vec<Line<'static>> {
         .iter()
         .rev()
         .map(|event| {
+            let style = event_style(event);
+
             Line::from(vec![
                 Span::styled("• ", Style::default().fg(Color::LightBlue)),
-                Span::raw(event.clone()),
+                Span::styled(event.clone(), style),
             ])
         })
         .collect()
+}
+
+fn event_style(event: &str) -> Style {
+    if event.contains("depose") {
+        Style::default()
+            .fg(Color::LightGreen)
+            .add_modifier(Modifier::BOLD)
+    } else if event.contains("collecte") {
+        Style::default().fg(Color::Yellow)
+    } else if event.contains("decouvre") {
+        Style::default().fg(Color::LightCyan)
+    } else if event.contains("refuse") || event.contains("aucun chemin") {
+        Style::default().fg(Color::LightRed)
+    } else {
+        Style::default().fg(Color::Gray)
+    }
+}
+
+fn sum_remaining(snapshot: &SimulationSnapshot, kind: ResourceKind) -> u32 {
+    snapshot
+        .resources
+        .iter()
+        .filter(|resource| resource.kind == kind)
+        .map(|resource| resource.quantity)
+        .sum()
+}
+
+fn percent(value: u32, total: u32) -> u32 {
+    if total == 0 {
+        100
+    } else {
+        ((value as f64 / total as f64) * 100.0).round() as u32
+    }
+}
+
+fn resource_short_label(kind: ResourceKind) -> &'static str {
+    match kind {
+        ResourceKind::Energy => "E",
+        ResourceKind::Crystal => "C",
+    }
 }

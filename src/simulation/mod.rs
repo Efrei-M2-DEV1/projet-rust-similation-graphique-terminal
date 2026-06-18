@@ -701,6 +701,5 @@ fn resource_label(kind: ResourceKind) -> &'static str {
     }
 }
 
-
 #[cfg(test)]
 mod tests;
