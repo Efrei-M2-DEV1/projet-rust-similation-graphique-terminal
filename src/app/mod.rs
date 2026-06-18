@@ -10,7 +10,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyEvent};
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode,
@@ -61,7 +61,12 @@ impl App {
         self.should_quit
     }
 
-    pub fn handle_key(&mut self, _key: KeyEvent) {
+    pub fn handle_key(&mut self, key: KeyEvent) {
+        // Sous Windows, des KeyRelease arrivent au démarrage et quittaient
+        // l'app instantanément si on ne filtre pas.
+        if key.kind != KeyEventKind::Press {
+            return;
+        }
         self.should_quit = true;
     }
 
@@ -80,10 +85,19 @@ impl App {
 
 pub fn run(mut app: App) -> Result<()> {
     let mut terminal = setup_terminal()?;
+    drain_pending_input()?;
     let run_result = run_loop(&mut terminal, &mut app);
     let restore_result = restore_terminal(&mut terminal);
 
     run_result.and(restore_result)
+}
+
+/// Vide les touches restées dans le buffer (Enter de la commande, etc.).
+fn drain_pending_input() -> Result<()> {
+    while event::poll(Duration::ZERO)? {
+        let _ = event::read()?;
+    }
+    Ok(())
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
