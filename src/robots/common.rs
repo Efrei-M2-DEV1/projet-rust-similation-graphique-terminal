@@ -204,3 +204,63 @@ pub fn visible_positions(center: Position, radius: i32, map: &Map) -> Vec<Positi
 
     positions
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::communication::Message;
+    use crate::utils::Position;
+    use crate::world::{Resource, ResourceKind, Tile};
+
+    fn pos(x: i32, y: i32) -> Position {
+        Position::new(x, y)
+    }
+
+    #[test]
+    fn connaissance_obstacle_via_message() {
+        // Un message ObstacleFound doit être mémorisé.
+        let mut knowledge = LocalKnowledge::default();
+        knowledge.apply_message(&Message::obstacle_found(pos(3, 3)));
+        assert!(knowledge.is_known_obstacle(pos(3, 3)));
+    }
+
+    #[test]
+    fn connaissance_ressource_via_message() {
+        // Un message ResourceFound doit alimenter la map de ressources connues.
+        let mut knowledge = LocalKnowledge::default();
+        knowledge.apply_message(&Message::resource_found(pos(1, 1), ResourceKind::Energy, 50));
+        assert!(knowledge.resources().contains_key(&pos(1, 1)));
+    }
+
+    #[test]
+    fn ressource_epuisee_est_supprimee() {
+        // Un message ResourceDepleted doit retirer la ressource de la connaissance.
+        let mut knowledge = LocalKnowledge::default();
+        knowledge.apply_message(&Message::resource_found(pos(2, 2), ResourceKind::Crystal, 10));
+        knowledge.apply_message(&Message::ResourceDepleted {
+            position: pos(2, 2),
+            kind: ResourceKind::Crystal,
+        });
+        assert!(!knowledge.resources().contains_key(&pos(2, 2)));
+    }
+
+    #[test]
+    fn observe_tile_obstacle_genere_message() {
+        // Observer un obstacle pour la première fois doit renvoyer un message.
+        let mut knowledge = LocalKnowledge::default();
+        let msg = knowledge.observe_tile(pos(5, 5), Tile::Obstacle);
+        assert!(msg.is_some());
+
+        // La deuxième observation du même obstacle ne génère rien (déjà connu).
+        let msg2 = knowledge.observe_tile(pos(5, 5), Tile::Obstacle);
+        assert!(msg2.is_none());
+    }
+
+    #[test]
+    fn observe_tile_ressource_genere_message() {
+        let mut knowledge = LocalKnowledge::default();
+        let r = Resource::new(ResourceKind::Energy, 100);
+        let msg = knowledge.observe_tile(pos(4, 4), Tile::Resource(r));
+        assert!(msg.is_some());
+    }
+}
