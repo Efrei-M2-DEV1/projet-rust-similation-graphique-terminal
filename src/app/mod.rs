@@ -134,6 +134,22 @@ impl App {
         self.map.count_resources(ResourceKind::Crystal)
     }
 
+    /// Nombre total d'unités d'énergie encore disponibles sur la carte.
+///
+/// Important : cette valeur n'est pas le nombre de gisements.
+/// Elle additionne les quantités restantes dans toutes les sources d'énergie.
+pub fn remaining_energy_units(&self) -> u32 {
+    self.map.sum_resource_quantity(ResourceKind::Energy)
+}
+
+/// Nombre total d'unités de cristaux encore disponibles sur la carte.
+///
+/// Même logique que pour l'énergie : on additionne les quantités restantes,
+/// pas seulement le nombre de cases contenant un cristal.
+pub fn remaining_crystal_units(&self) -> u32 {
+    self.map.sum_resource_quantity(ResourceKind::Crystal)
+}
+
     pub fn known_resources(&self) -> usize {
         self.known_resources
     }

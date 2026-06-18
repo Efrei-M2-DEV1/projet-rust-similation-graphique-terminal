@@ -4,7 +4,7 @@
 
 use crate::utils::Position;
 use crate::world::resource::ResourceKind;
-use crate::world::tile::Tile;
+use crate::world::tile::{self, Tile};
 
 /// Carte du monde — grille rectangulaire `width x height` de [`Tile`].
 ///
@@ -106,11 +106,31 @@ impl Map {
             .filter(|t| matches!(t, Tile::Resource(r) if r.kind == kind))
             .count()
     }
+   /// Additionne les quantités restantes pour un type de ressource.
+///
+/// Différence importante avec `count_resources` :
+/// - `count_resources(ResourceKind::Energy)` compte le nombre de gisements E.
+/// - `sum_resource_quantity(ResourceKind::Energy)` additionne les unités restantes.
+///
+/// Exemple :
+/// Si la carte contient 3 sources d'énergie de 50, 100 et 120 unités,
+/// cette fonction renvoie 270.
+pub fn sum_resource_quantity(&self, kind: ResourceKind) -> u32 {
+    self.tiles
+        .iter()
+        .filter_map(|tile| match tile {
+            Tile::Resource(resource) if resource.kind == kind => Some(resource.quantity),
+            _ => None,
+        })
+        .sum()
+}
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::world :: resource:: Resource;
 
     #[test]
     fn empty_map_has_base_at_center() {
@@ -125,4 +145,27 @@ mod tests {
         assert!(map.get(Position::new(-1, 0)).is_none());
         assert!(map.get(Position::new(4, 0)).is_none());
     }
+
+    #[test]
+    fn sum_resource_quantity_adds_remaining_units() {
+    let mut map = Map::empty(6, 6);
+
+    map.set(
+        Position::new(1, 1),
+        Tile::Resource(Resource::new(ResourceKind::Energy, 50)),
+    );
+
+    map.set(
+        Position::new(2, 1),
+        Tile::Resource(Resource::new(ResourceKind::Energy, 120)),
+    );
+
+    map.set(
+        Position::new(3, 1),
+        Tile::Resource(Resource::new(ResourceKind::Crystal, 80)),
+    );
+
+    assert_eq!(map.sum_resource_quantity(ResourceKind::Energy), 170);
+    assert_eq!(map.sum_resource_quantity(ResourceKind::Crystal), 80);
+}
 }

@@ -135,6 +135,8 @@ fn tile_span(tile: &Tile) -> Span<'static> {
 }
 
 fn stats_lines(app: &App) -> Vec<Line<'static>> {
+    // Petit spinner visuel pour montrer que la simulation tourne.
+    // On change de symbole selon le tick courant.
     let spinner = ["|", "/", "-", "\\"][(app.tick() as usize) % 4];
 
     vec![
@@ -142,27 +144,47 @@ fn stats_lines(app: &App) -> Vec<Line<'static>> {
             Span::styled("Etat: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(format!("Simulation en cours {}", spinner)),
         ]),
+
         Line::from(vec![
             Span::styled("Tick: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(app.tick().to_string()),
         ]),
+
         Line::from(""),
+
+        // Ici on affiche les unités collectées ET les unités restantes.
+        // C'est plus précis que seulement compter le nombre de gisements.
         Line::from(vec![
-            Span::styled("E collecte: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(app.stats.collected_energy.to_string()),
+            Span::styled("Energie: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(format!(
+                "{} u collectees / {} u restantes",
+                app.stats.collected_energy,
+                app.remaining_energy_units()
+            )),
         ]),
+
         Line::from(vec![
-            Span::styled("C collecte: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(app.stats.collected_crystals.to_string()),
+            Span::styled("Cristaux: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(format!(
+                "{} u collectees / {} u restantes",
+                app.stats.collected_crystals,
+                app.remaining_crystal_units()
+            )),
         ]),
+
+        // Ici on garde aussi le nombre de gisements encore présents.
+        // Cela permet de distinguer :
+        // - combien de zones de ressources restent ;
+        // - combien d'unités restent au total.
         Line::from(vec![
-            Span::styled("E restantes: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(app.remaining_energy().to_string()),
+            Span::styled("Gisements: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(format!(
+                "{} E / {} C",
+                app.remaining_energy(),
+                app.remaining_crystals()
+            )),
         ]),
-        Line::from(vec![
-            Span::styled("C restantes: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(app.remaining_crystals().to_string()),
-        ]),
+
         Line::from(vec![
             Span::styled("Robots: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(format!(
@@ -171,6 +193,7 @@ fn stats_lines(app: &App) -> Vec<Line<'static>> {
                 app.collectors.len()
             )),
         ]),
+
         Line::from(vec![
             Span::styled("Connues: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(format!(
