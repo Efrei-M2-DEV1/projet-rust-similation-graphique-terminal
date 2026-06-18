@@ -6,6 +6,7 @@
 //! - rafraîchir l'état de simulation
 //! - demander le rendu à la couche `ui`
 
+use std::collections::HashSet;
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -21,9 +22,14 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
+use crate::communication::{self, CommHub, TickClock};
+use crate::robots::{CollectorRobot, Robot, RobotTickContext, ScoutRobot};
 use crate::ui;
 use crate::utils::Position;
 use crate::world::{Map, ResourceKind};
+
+const SCOUT_COUNT: usize = 3;
+const COLLECTOR_COUNT: usize = 3;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ResourceCounters {
@@ -31,26 +37,57 @@ pub struct ResourceCounters {
     pub collected_crystals: u32,
 }
 
-#[derive(Debug)]
 pub struct App {
     pub map: Map,
     pub stats: ResourceCounters,
     pub scouts: Vec<Position>,
     pub collectors: Vec<Position>,
+    scout_robots: Vec<ScoutRobot>,
+    collector_robots: Vec<CollectorRobot>,
+    hub: CommHub,
+    clock: TickClock,
+    known_resources: usize,
+    known_obstacles: usize,
     should_quit: bool,
     tick: u64,
 }
 
 impl App {
     pub fn new(map: Map) -> Self {
-        Self {
+        let (mut hub, mut clock) = communication::setup(map.base());
+        let mut scout_robots = Vec::with_capacity(SCOUT_COUNT);
+        let mut collector_robots = Vec::with_capacity(COLLECTOR_COUNT);
+
+        for index in 0..SCOUT_COUNT {
+            let handle = communication::register_robot(&mut hub, &mut clock);
+            scout_robots.push(ScoutRobot::new(
+                handle,
+                map.base(),
+                0x5C0A_0000 + index as u64,
+            ));
+        }
+
+        for _ in 0..COLLECTOR_COUNT {
+            let handle = communication::register_robot(&mut hub, &mut clock);
+            collector_robots.push(CollectorRobot::new(handle, map.base()));
+        }
+
+        let mut app = Self {
             map,
             stats: ResourceCounters::default(),
             scouts: Vec::new(),
             collectors: Vec::new(),
+            scout_robots,
+            collector_robots,
+            hub,
+            clock,
+            known_resources: 0,
+            known_obstacles: 0,
             should_quit: false,
             tick: 0,
-        }
+        };
+        app.refresh_robot_positions();
+        app
     }
 
     pub fn tick(&self) -> u64 {
@@ -66,7 +103,22 @@ impl App {
     }
 
     pub fn update(&mut self) {
-        self.tick = self.tick.wrapping_add(1);
+        self.tick = self.clock.force_tick();
+        let mut occupied = self.occupied_positions();
+
+        for scout in &mut self.scout_robots {
+            let mut ctx = RobotTickContext::new(&mut self.map, &mut occupied);
+            scout.tick(&mut ctx);
+        }
+
+        for collector in &mut self.collector_robots {
+            let mut ctx = RobotTickContext::new(&mut self.map, &mut occupied);
+            collector.tick(&mut ctx);
+        }
+
+        self.hub.poll();
+        self.sync_from_base();
+        self.refresh_robot_positions();
     }
 
     pub fn remaining_energy(&self) -> usize {
@@ -75,6 +127,45 @@ impl App {
 
     pub fn remaining_crystals(&self) -> usize {
         self.map.count_resources(ResourceKind::Crystal)
+    }
+
+    pub fn known_resources(&self) -> usize {
+        self.known_resources
+    }
+
+    pub fn known_obstacles(&self) -> usize {
+        self.known_obstacles
+    }
+
+    fn occupied_positions(&self) -> HashSet<Position> {
+        let base = self.map.base();
+        self.scout_robots
+            .iter()
+            .map(|robot| robot.position())
+            .chain(self.collector_robots.iter().map(|robot| robot.position()))
+            .filter(|position| *position != base)
+            .collect()
+    }
+
+    fn refresh_robot_positions(&mut self) {
+        self.scouts = self.scout_robots.iter().map(|robot| robot.position()).collect();
+        self.collectors = self
+            .collector_robots
+            .iter()
+            .map(|robot| robot.position())
+            .collect();
+    }
+
+    fn sync_from_base(&mut self) {
+        let base_ref = self.hub.base();
+        let Ok(base) = base_ref.lock() else {
+            return;
+        };
+
+        self.stats.collected_energy = base.stored_energy();
+        self.stats.collected_crystals = base.stored_crystals();
+        self.known_resources = base.known_resource_count();
+        self.known_obstacles = base.known_obstacles().len();
     }
 }
 
