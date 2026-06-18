@@ -700,3 +700,7 @@ fn resource_label(kind: ResourceKind) -> &'static str {
         ResourceKind::Crystal => "cristal",
     }
 }
+
+
+#[cfg(test)]
+mod tests;
