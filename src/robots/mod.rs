@@ -12,5 +12,5 @@ mod common;
 mod scout;
 
 pub use collector::CollectorRobot;
-pub use common::{RobotKind, RobotSnapshot};
+pub use common::{CarriedResource, RobotKind, RobotSnapshot};
 pub use scout::ScoutRobot;

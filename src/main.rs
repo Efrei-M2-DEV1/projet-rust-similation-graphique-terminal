@@ -31,7 +31,7 @@ fn main() -> Result<()> {
 
     // 3. On crée le moteur de simulation.
     // Ici, on démarre 3 scouts et 3 collectors.
-    let simulation = SimulationEngine::new(map, 3, 3).start();
+    let simulation = SimulationEngine::new(map, 4, 4).start();
 
     // 4. Ratatui reste dans le thread principal.
     // La simulation tourne dans ses propres threads et envoie des snapshots à l'UI.

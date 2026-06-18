@@ -18,7 +18,12 @@ use crate::robots::common::{visible_positions, LocalKnowledge};
 use crate::utils::Position;
 use crate::world::Map;
 
-pub const SCOUT_SCAN_RADIUS: i32 = 1;
+/// Rayon de perception locale du scout.
+///
+/// 2 reste une connaissance locale : le robot ne voit pas toute la carte.
+/// Mais cela évite une simulation trop lente où les collectors attendent longtemps
+/// avant de recevoir une ressource connue.
+pub const SCOUT_SCAN_RADIUS: i32 = 2;
 
 pub struct ScoutRobot {
     id: RobotId,
