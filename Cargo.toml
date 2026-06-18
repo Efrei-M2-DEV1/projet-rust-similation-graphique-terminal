@@ -1,9 +1,9 @@
 [package]
 name = "projet-rust"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Equipe EFREI M2 - Dev1"]
-description = "Resource Collection Simulation - robots autonomes (Ratatui)"
+description = "Resource Collection Simulation - robots autonomes concurrents avec Ratatui"
 
 [dependencies]
 # Rendu terminal
@@ -14,7 +14,7 @@ crossterm = "0.28"
 noise = "0.9"
 rand = "0.8"
 
-# Concurrence
+# Concurrence / Communication entre threads
 crossbeam-channel = "0.5"
 
 # Navigation (alias pour éviter le conflit avec le module local `pathfinding`)

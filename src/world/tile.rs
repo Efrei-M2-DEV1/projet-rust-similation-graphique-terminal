@@ -20,7 +20,7 @@ impl Tile {
     pub fn is_walkable(&self) -> bool {
         !matches!(self, Tile::Obstacle)
     }
-
+    // #[allow(dead_code)]
     /// Caractère ASCII utilisé pour le rendu.
     pub fn glyph(&self) -> char {
         match self {

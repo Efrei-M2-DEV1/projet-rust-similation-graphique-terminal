@@ -43,8 +43,18 @@ impl Map {
         let mut rng = StdRng::seed_from_u64(seed);
         let mut placed = 0;
 
-        placed += self.place_kind(&mut rng, ResourceKind::Energy, params.energy_count, params.max_attempts_per_resource);
-        placed += self.place_kind(&mut rng, ResourceKind::Crystal, params.crystal_count, params.max_attempts_per_resource);
+        placed += self.place_kind(
+            &mut rng,
+            ResourceKind::Energy,
+            params.energy_count,
+            params.max_attempts_per_resource,
+        );
+        placed += self.place_kind(
+            &mut rng,
+            ResourceKind::Crystal,
+            params.crystal_count,
+            params.max_attempts_per_resource,
+        );
 
         placed
     }
@@ -100,7 +110,13 @@ mod tests {
         let mut b = Map::generate(40, 20, 5);
         a.populate_resources(77);
         b.populate_resources(77);
-        assert_eq!(a.count_resources(ResourceKind::Energy), b.count_resources(ResourceKind::Energy));
-        assert_eq!(a.count_resources(ResourceKind::Crystal), b.count_resources(ResourceKind::Crystal));
+        assert_eq!(
+            a.count_resources(ResourceKind::Energy),
+            b.count_resources(ResourceKind::Energy)
+        );
+        assert_eq!(
+            a.count_resources(ResourceKind::Crystal),
+            b.count_resources(ResourceKind::Crystal)
+        );
     }
 }

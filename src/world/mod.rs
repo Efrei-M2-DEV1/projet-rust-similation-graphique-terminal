@@ -4,11 +4,11 @@
 //! - [`Tile`] : nature d'une case (vide, obstacle, base, ressource)
 //! - [`Resource`] / [`ResourceKind`] : ressources collectables
 
+pub mod generator;
+pub mod map;
+pub mod populate;
 pub mod resource;
 pub mod tile;
-pub mod map;
-pub mod generator;
-pub mod populate;
 
 pub use generator::GenParams;
 pub use map::Map;
