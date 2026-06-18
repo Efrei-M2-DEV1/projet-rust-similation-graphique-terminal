@@ -18,7 +18,7 @@ rand = "0.8"
 crossbeam-channel = "0.5"
 
 # Navigation
-pathfinding = "4.11"
+pathfinding_crate = { package = "pathfinding", version = "4.11" }
 
 # Erreurs
 anyhow = "1"

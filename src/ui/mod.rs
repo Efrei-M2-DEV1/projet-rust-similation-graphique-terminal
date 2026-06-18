@@ -24,7 +24,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
 
     let side_split = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(8), Constraint::Length(10), Constraint::Min(5)])
+        .constraints([Constraint::Length(10), Constraint::Length(10), Constraint::Min(5)])
         .split(side_area);
 
     let map_widget = Paragraph::new(Text::from(render_map_lines(app))).block(
@@ -169,6 +169,14 @@ fn stats_lines(app: &App) -> Vec<Line<'static>> {
                 "{} eclaireurs / {} collecteurs",
                 app.scouts.len(),
                 app.collectors.len()
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled("Connues: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(format!(
+                "{} ressources / {} obstacles",
+                app.known_resources(),
+                app.known_obstacles()
             )),
         ]),
     ]

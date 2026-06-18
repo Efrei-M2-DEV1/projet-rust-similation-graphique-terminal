@@ -1,10 +1,12 @@
 //! Resource Collection Simulation — point d'entrée.
 //!
-//! Squelette initial : les modules (`world`, `robots`, `communication`,
-//! `ui`, `pathfinding`) seront ajoutés progressivement.
+//! Assemble la carte procedurale, les robots, la communication et l'UI
+//! Ratatui.
 
 mod app;
 mod communication;
+mod pathfinding;
+mod robots;
 mod ui;
 mod utils;
 mod world;
