@@ -41,14 +41,14 @@ pub fn find_path_avoiding(
 
     astar(
         &start,
-        |position| {
+        |position| -> Vec<(Position, u32)> {
             position
                 .neighbors4()
                 .into_iter()
                 .filter(|next| map.is_walkable(*next))
                 .filter(|next| *next == goal || !blocked.contains(next))
                 .map(|next| (next, 1_u32))
-                .collect::<Vec<_>>()
+                .collect()
         },
         |position| position.manhattan(goal),
         |position| *position == goal,

@@ -246,3 +246,99 @@ impl Robot for CollectorRobot {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+    use crate::communication::{CommHub, Message, TickClock};
+    use crate::robots::common::RobotTickContext;
+    use crate::utils::Position;
+    use crate::world::{Map, Resource, ResourceKind, Tile};
+
+    /// Construit un CollectorRobot branché sur un CommHub + TickClock.
+    fn make_collector(map: &Map) -> (CollectorRobot, TickClock, CommHub) {
+        let mut hub = CommHub::new(map.base());
+        let comm = hub.register_robot();
+        let mut clock = TickClock::new(1000);
+        let tick_rx = clock.subscribe();
+        let handle = RobotHandle { comm, tick_rx };
+        let collector = CollectorRobot::new(handle, map.base());
+        (collector, clock, hub)
+    }
+
+    #[test]
+    fn collector_en_attente_sans_ressource_connue() {
+        // Sans ressource dans sa connaissance locale, le collector doit
+        // rester en état Waiting après un tick.
+        let map = Map::generate(20, 10, 1);
+        let (mut collector, mut clock, _hub) = make_collector(&map);
+        clock.force_tick();
+
+        let mut map2 = map.clone();
+        let mut occupied = HashSet::new();
+        let mut ctx = RobotTickContext::new(&mut map2, &mut occupied);
+        collector.tick(&mut ctx);
+
+        assert_eq!(collector.state(), CollectorState::Waiting);
+    }
+
+    #[test]
+    fn collector_se_dirige_vers_ressource_connue() {
+        // On signale une ressource voisine via un message ; après le tick
+        // le collector doit passer en MovingToResource ou Collecting.
+        let mut map = Map::generate(20, 10, 2);
+        let target = Position::new(map.base().x + 2, map.base().y);
+
+        // Placer la ressource sur la carte.
+        map.set(target, Tile::Resource(Resource::new(ResourceKind::Energy, 10)));
+
+        let (mut collector, mut clock, _hub) = make_collector(&map);
+
+        // Informer le collector de la ressource via le canal de messages.
+        collector.knowledge.apply_message(&Message::resource_found(
+            target,
+            ResourceKind::Energy,
+            10,
+        ));
+
+        clock.force_tick();
+
+        let mut map2 = map.clone();
+        let mut occupied = HashSet::new();
+        let mut ctx = RobotTickContext::new(&mut map2, &mut occupied);
+        collector.tick(&mut ctx);
+
+        assert!(
+            matches!(
+                collector.state(),
+                CollectorState::MovingToResource | CollectorState::Collecting
+            ),
+            "état attendu: MovingToResource ou Collecting, obtenu: {:?}",
+            collector.state()
+        );
+    }
+
+    #[test]
+    fn collector_ne_bouge_pas_sans_tick() {
+        // Sans signal de tick, la position ne change pas.
+        let map = Map::generate(20, 10, 3);
+        let (mut collector, _clock, _hub) = make_collector(&map);
+        let pos_before = collector.position();
+
+        let mut map2 = map.clone();
+        let mut occupied = HashSet::new();
+        let mut ctx = RobotTickContext::new(&mut map2, &mut occupied);
+        collector.tick(&mut ctx);
+
+        assert_eq!(collector.position(), pos_before);
+    }
+
+    #[test]
+    fn collector_genre_collector() {
+        let map = Map::generate(10, 10, 0);
+        let (collector, _clock, _hub) = make_collector(&map);
+        assert_eq!(collector.kind(), RobotKind::Collector);
+    }
+}

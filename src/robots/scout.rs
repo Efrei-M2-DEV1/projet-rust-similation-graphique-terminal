@@ -94,3 +94,95 @@ impl Robot for ScoutRobot {
         self.move_randomly(ctx);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+    use crate::communication::{CommHub, TickClock};
+    use crate::robots::common::RobotTickContext;
+    use crate::world::Map;
+
+    /// Construit un ScoutRobot branché sur un CommHub + TickClock de test.
+    fn make_scout(map: &Map) -> (ScoutRobot, TickClock, CommHub) {
+        let mut hub = CommHub::new(map.base());
+        let comm = hub.register_robot();
+        let mut clock = TickClock::new(1000);
+        let tick_rx = clock.subscribe();
+        let handle = RobotHandle { comm, tick_rx };
+        let scout = ScoutRobot::new(handle, map.base(), 42);
+        (scout, clock, hub)
+    }
+
+    #[test]
+    fn scout_ne_bouge_pas_sans_tick() {
+        // Sans signal de tick, le scout ne doit pas changer de position.
+        let map = Map::generate(20, 10, 1);
+        let (mut scout, _clock, _hub) = make_scout(&map);
+        let pos_before = scout.position();
+
+        let mut map2 = map.clone();
+        let mut occupied = HashSet::new();
+        let mut ctx = RobotTickContext::new(&mut map2, &mut occupied);
+        scout.tick(&mut ctx);
+
+        assert_eq!(scout.position(), pos_before, "pas de mouvement sans tick");
+    }
+
+    #[test]
+    fn scout_bouge_apres_tick() {
+        // Après un tick forcé le scout doit tenter de se déplacer sur
+        // une carte sans obstacle autour de la base.
+        let map = Map::generate(20, 10, 0);
+        let (mut scout, mut clock, _hub) = make_scout(&map);
+
+        clock.force_tick();
+
+        let mut map2 = map.clone();
+        let mut occupied = HashSet::new();
+        let mut ctx = RobotTickContext::new(&mut map2, &mut occupied);
+        scout.tick(&mut ctx);
+
+        // On ne peut pas garantir la destination (aléatoire) mais le
+        // robot doit avoir appelé son tick sans paniquer.
+        assert!(map2.in_bounds(scout.position()), "position hors carte");
+    }
+
+    #[test]
+    fn scout_evite_les_obstacles_connus() {
+        // On place un obstacle dans la connaissance locale du scout et on
+        // vérifie qu'il n'essaie pas d'y aller.
+        let map = Map::generate(20, 10, 5);
+        let (mut scout, mut clock, _hub) = make_scout(&map);
+
+        // Marquer tous les voisins comme obstacles sauf la base.
+        let base = map.base();
+        for p in base.neighbors4() {
+            scout.knowledge.apply_message(&crate::communication::Message::obstacle_found(p));
+        }
+
+        clock.force_tick();
+
+        let mut map2 = map.clone();
+        let mut occupied = HashSet::new();
+        let mut ctx = RobotTickContext::new(&mut map2, &mut occupied);
+        scout.tick(&mut ctx);
+
+        // Le scout doit rester sur place car tous les voisins sont
+        // marqués obstacles (ou hors bornes selon la map).
+        for p in base.neighbors4() {
+            assert_ne!(
+                scout.position(), p,
+                "le scout ne doit pas entrer dans un obstacle connu"
+            );
+        }
+    }
+
+    #[test]
+    fn scout_genre_scout() {
+        let map = Map::generate(10, 10, 0);
+        let (scout, _clock, _hub) = make_scout(&map);
+        assert_eq!(scout.kind(), RobotKind::Scout);
+    }
+}

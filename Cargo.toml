@@ -17,7 +17,7 @@ rand = "0.8"
 # Concurrence
 crossbeam-channel = "0.5"
 
-# Navigation
+# Navigation (alias pour éviter le conflit avec le module local `pathfinding`)
 pathfinding_crate = { package = "pathfinding", version = "4.11" }
 
 # Erreurs
