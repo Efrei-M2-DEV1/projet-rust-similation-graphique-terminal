@@ -242,7 +242,6 @@ fn run_hub(
 
     // La connaissance est marquée dirty quand quelque chose change.
     // On ne la diffuse pas en permanence, seulement quand c'est utile.
-    let mut knowledge_dirty = true;
 
     loop {
         if let Ok(SimulationCommand::Shutdown) = command_rx.try_recv() {
@@ -254,7 +253,7 @@ fn run_hub(
 
         // On traite tous les messages robots disponibles sans bloquer.
         while let Ok(message) = robot_rx.try_recv() {
-            let changed_knowledge = handle_robot_message(
+            let _changed_knowledge = handle_robot_message(
                 message,
                 &map,
                 &robot_senders,
@@ -267,10 +266,6 @@ fn run_hub(
                 &mut collected_crystals,
                 &mut events,
             );
-
-            if changed_knowledge {
-                knowledge_dirty = true;
-            }
         }
 
         // Toutes les 120 ms : nouveau tick de simulation.
@@ -291,7 +286,6 @@ fn run_hub(
             // Ce n'est PAS un flood comme avant : on le fait seulement au rythme du tick,
             // pas en boucle toutes les 5 ms.
             broadcast_knowledge(&robot_senders, &known_resources, &known_obstacles);
-            knowledge_dirty = false;
 
             for tx in robot_senders.values() {
                 let _ = tx.try_send(HubToRobot::Tick(tick));

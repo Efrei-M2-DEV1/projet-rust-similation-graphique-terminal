@@ -64,6 +64,7 @@ impl Direction {
         }
     }
 
+    #[allow(dead_code)]
     pub const ALL: [Direction; 4] = [
         Direction::North,
         Direction::East,

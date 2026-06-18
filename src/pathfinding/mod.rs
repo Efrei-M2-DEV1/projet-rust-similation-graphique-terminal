@@ -14,6 +14,7 @@ use pathfinding_crate::prelude::astar;
 use crate::utils::Position;
 use crate::world::Map;
 
+#[allow(dead_code)]
 pub fn find_path(map: &Map, start: Position, goal: Position) -> Option<Vec<Position>> {
     find_path_avoiding(map, start, goal, &HashSet::new())
 }

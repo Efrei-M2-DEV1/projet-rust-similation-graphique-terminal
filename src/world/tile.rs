@@ -22,6 +22,7 @@ impl Tile {
     }
     // #[allow(dead_code)]
     /// Caractère ASCII utilisé pour le rendu.
+    #[allow(dead_code)]
     pub fn glyph(&self) -> char {
         match self {
             Tile::Empty => '.',

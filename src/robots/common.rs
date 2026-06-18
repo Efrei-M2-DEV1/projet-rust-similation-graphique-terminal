@@ -56,6 +56,7 @@ impl LocalKnowledge {
         &self.resources
     }
 
+    #[allow(dead_code)]
     pub fn obstacles(&self) -> &HashSet<Position> {
         &self.obstacles
     }

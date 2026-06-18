@@ -1,8 +1,14 @@
-//! Module `world` — carte, tuiles et ressources.
+//! Module `world`.
 //!
-//! Ce module est la responsabilité de Dev 1. Il expose :
-//! - [`Tile`] : nature d'une case (vide, obstacle, base, ressource)
-//! - [`Resource`] / [`ResourceKind`] : ressources collectables
+//! Il regroupe tout ce qui décrit la carte de simulation :
+//! - la génération procédurale ;
+//! - le placement des ressources ;
+//! - les tuiles ;
+//! - les ressources ;
+//! - la structure Map.
+//!
+//! On ne réexporte ici que les types réellement utilisés par le reste du projet,
+//! afin d'éviter les imports inutilisés et de garder une API claire.
 
 pub mod generator;
 pub mod map;
@@ -10,8 +16,6 @@ pub mod populate;
 pub mod resource;
 pub mod tile;
 
-pub use generator::GenParams;
 pub use map::Map;
-pub use populate::PopulateParams;
-pub use resource::{Resource, ResourceKind};
+pub use resource::ResourceKind;
 pub use tile::Tile;

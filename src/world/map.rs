@@ -65,6 +65,7 @@ impl Map {
     }
 
     /// Accès en écriture (None si hors bornes).
+    #[allow(dead_code)]
     pub fn get_mut(&mut self, p: Position) -> Option<&mut Tile> {
         if self.in_bounds(p) {
             let i = self.index(p);
@@ -95,6 +96,7 @@ impl Map {
     }
 
     /// Compte les obstacles présents sur la carte.
+    #[allow(dead_code)]
     pub fn count_obstacles(&self) -> usize {
         self.tiles
             .iter()
@@ -103,6 +105,7 @@ impl Map {
     }
 
     /// Compte les ressources d'un certain type.
+    #[allow(dead_code)]
     pub fn count_resources(&self, kind: ResourceKind) -> usize {
         self.tiles
             .iter()
@@ -118,6 +121,7 @@ impl Map {
     /// Exemple :
     /// Si la carte contient 3 sources d'énergie de 50, 100 et 120 unités,
     /// cette fonction renvoie 270.
+    #[allow(dead_code)]
     pub fn sum_resource_quantity(&self, kind: ResourceKind) -> u32 {
         self.tiles
             .iter()

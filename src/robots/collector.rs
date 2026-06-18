@@ -48,6 +48,7 @@ pub enum CollectorState {
 }
 
 impl CollectorState {
+    #[allow(dead_code)]
     pub const fn label(self) -> &'static str {
         match self {
             CollectorState::Waiting => "waiting",
