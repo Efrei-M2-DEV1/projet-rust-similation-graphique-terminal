@@ -3,6 +3,7 @@
 //! Squelette initial : les modules (`world`, `robots`, `communication`,
 //! `ui`, `pathfinding`) seront ajoutés progressivement.
 
+mod communication;
 mod utils;
 mod world;
 
