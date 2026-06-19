@@ -295,7 +295,7 @@ impl CollectorRobot {
     }
 
     fn preferred_kind(&self) -> ResourceKind {
-        if self.id.0 % 2 == 0 {
+        if self.id.0.is_multiple_of(2) {
             ResourceKind::Energy
         } else {
             ResourceKind::Crystal

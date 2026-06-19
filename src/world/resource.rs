@@ -47,7 +47,6 @@ impl Resource {
     }
 
     /// Prélève une unité ; renvoie `true` si une unité a été retirée.
-
     #[allow(dead_code)]
     pub fn take_one(&mut self) -> bool {
         if self.quantity == 0 {
