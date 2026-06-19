@@ -1,13 +1,11 @@
-//! Utilitaires partagés : position dans la grille, directions cardinales,
-//! petits helpers géométriques.
+//! Shared helpers: grid position, cardinal directions, small geometry.
 
 use std::ops::Add;
 
-/// Coordonnée 2D dans la grille de la carte.
+/// 2D coordinate in the map grid.
 ///
-/// Les coordonnées sont des `i32` pour autoriser les calculs de delta
-/// (déplacements négatifs) sans cast ; les bornes sont vérifiées par
-/// la `Map` au moment de l'accès.
+/// Stored as `i32` so deltas can be negative without casts; bounds are checked
+/// by the [`crate::world::Map`] on access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Position {
     pub x: i32,
@@ -19,13 +17,12 @@ impl Position {
         Self { x, y }
     }
 
-    /// Distance de Manhattan — heuristique standard pour A* sur grille
-    /// 4-connexe (utilisée par le module `pathfinding`).
+    /// Manhattan distance — the A* heuristic on a 4-connected grid.
     pub fn manhattan(self, other: Self) -> u32 {
         (self.x - other.x).unsigned_abs() + (self.y - other.y).unsigned_abs()
     }
 
-    /// Renvoie les 4 voisins cardinaux (sans filtrage de bornes).
+    /// The 4 cardinal neighbours (no bounds filtering).
     pub fn neighbors4(self) -> [Position; 4] {
         [
             self + Direction::North.delta(),
@@ -43,8 +40,7 @@ impl Add<(i32, i32)> for Position {
     }
 }
 
-/// Directions cardinales utilisées par les robots pour se déplacer
-/// d'une case à la fois.
+/// Cardinal directions used by robots to move one cell at a time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     North,
@@ -54,7 +50,7 @@ pub enum Direction {
 }
 
 impl Direction {
-    /// Vecteur de déplacement associé.
+    /// Associated movement vector.
     pub const fn delta(self) -> (i32, i32) {
         match self {
             Direction::North => (0, -1),
@@ -63,14 +59,6 @@ impl Direction {
             Direction::West => (-1, 0),
         }
     }
-
-    #[allow(dead_code)]
-    pub const ALL: [Direction; 4] = [
-        Direction::North,
-        Direction::East,
-        Direction::South,
-        Direction::West,
-    ];
 }
 
 #[cfg(test)]

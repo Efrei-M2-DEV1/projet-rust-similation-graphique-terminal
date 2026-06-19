@@ -1,8 +1,7 @@
-//! Boucle Ratatui.
+//! Ratatui loop.
 //!
-//! Important :
-//! l'UI ne fait plus tourner la simulation.
-//! Elle reçoit simplement des snapshots produits par le thread de simulation.
+//! The UI no longer drives the simulation: it only receives snapshots produced
+//! by the simulation thread.
 
 use std::io;
 use std::time::Duration;
@@ -38,9 +37,9 @@ fn run_loop(
     let mut latest_snapshot: Option<SimulationSnapshot> = None;
 
     loop {
-        // On draine tous les snapshots disponibles et on ne garde que le plus récent.
-        // Cela évite que l'UI prenne du retard si la simulation envoie plus vite
-        // que le rendu terminal.
+        // Drain every available snapshot and keep only the most recent one.
+        // This prevents the UI from lagging when the simulation produces
+        // snapshots faster than the terminal can render them.
         for snapshot in simulation.snapshot_rx.try_iter() {
             latest_snapshot = Some(snapshot);
         }
@@ -66,8 +65,8 @@ fn run_loop(
     Ok(())
 }
 
-/// Vide les touches restées dans le buffer.
-/// Utile sous Windows pour éviter de quitter immédiatement au lancement.
+/// Flushes input keys left in the buffer.
+/// Useful on Windows to avoid quitting immediately on launch.
 fn drain_pending_input() -> Result<()> {
     while event::poll(Duration::ZERO)? {
         let _ = event::read()?;

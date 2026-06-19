@@ -1,24 +1,18 @@
-//! Messages échangés entre les robots, le hub et l'interface.
+//! Messages exchanged between robots, the hub and the UI.
 //!
-//! On sépare volontairement les messages :
-//! - RobotToHub : messages envoyés par un robot au hub.
-//! - HubToRobot : messages envoyés par le hub à un robot.
-//! - SimulationCommand : commandes envoyées par l'UI à la simulation.
-//!
-//! Cette séparation rend le code plus clair à expliquer en soutenance.
+//! Messages are split on purpose:
+//! - RobotToHub: messages sent by a robot to the hub.
+//! - HubToRobot: messages sent by the hub to a robot.
+//! - SimulationCommand: commands sent by the UI to the simulation.
 
 use crate::utils::Position;
 use crate::world::ResourceKind;
 
-/// Identifiant unique d'un robot.
-///
-/// Exemple :
-/// - R0 peut être un scout.
-/// - R4 peut être un collector.
+/// Unique identifier of a robot (e.g. R0 a scout, R4 a collector).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RobotId(pub usize);
 
-/// Ressource connue par le hub ou par un robot.
+/// A resource known by the hub or by a robot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KnownResource {
     pub position: Position,
@@ -26,13 +20,13 @@ pub struct KnownResource {
     pub quantity: u32,
 }
 
-/// Messages envoyés par les robots vers le hub.
+/// Messages sent by robots to the hub.
 ///
-/// Le hub est le seul à posséder l'état global officiel.
-/// Les robots demandent ou signalent ; le hub décide.
+/// The hub owns the single official global state: robots request or report,
+/// the hub decides.
 #[derive(Debug, Clone)]
 pub enum RobotToHub {
-    /// Un robot a découvert une ressource.
+    /// A robot discovered a resource.
     ResourceDiscovered {
         robot_id: RobotId,
         position: Position,
@@ -40,77 +34,73 @@ pub enum RobotToHub {
         quantity: u32,
     },
 
-    /// Un robot a découvert un obstacle.
+    /// A robot discovered an obstacle.
     ObstacleDiscovered {
         robot_id: RobotId,
         position: Position,
     },
 
-    /// Un robot demande à se déplacer.
+    /// A robot requests a move.
     ///
-    /// Important : le robot ne se déplace pas directement.
-    /// Il propose un mouvement, et le hub accepte ou refuse.
+    /// The robot never moves on its own: it proposes a move and the hub
+    /// accepts or rejects it.
     MoveRequested {
         robot_id: RobotId,
         from: Position,
         to: Position,
     },
 
-    /// Un collecteur demande à collecter une unité sur une position.
+    /// A collector requests to collect one unit at a position.
     CollectRequested {
         robot_id: RobotId,
         position: Position,
     },
 
-    /// Un collecteur dépose sa cargaison à la base.
+    /// A collector deposits its cargo at the base.
     Deposit {
         robot_id: RobotId,
         kind: ResourceKind,
         amount: u32,
     },
 
-    /// Message libre utile pour le journal d'événements.
+    /// Free-form message for the event log.
     Log { robot_id: RobotId, text: String },
 }
 
-/// Messages envoyés par le hub vers les robots.
+/// Messages sent by the hub to robots.
 #[derive(Debug, Clone)]
 pub enum HubToRobot {
-    /// Le hub donne le signal d'un nouveau tick.
-    ///
-    /// Les robots agissent en réaction à ce tick.
+    /// The hub signals a new tick; robots act in reaction to it.
     Tick(u64),
 
-    /// Le hub partage l'état de connaissance global.
-    ///
-    /// Les robots gardent une connaissance locale,
-    /// mais ils reçoivent régulièrement les découvertes agrégées.
+    /// The hub shares the aggregated global knowledge. Robots keep a local
+    /// knowledge but regularly receive the merged discoveries.
     Knowledge {
         resources: Vec<KnownResource>,
         obstacles: Vec<Position>,
     },
 
-    /// Le hub accepte le déplacement demandé.
+    /// The hub accepts the requested move.
     MoveGranted { to: Position },
 
-    /// Le hub refuse le déplacement demandé.
+    /// The hub rejects the requested move.
     MoveDenied { attempted: Position },
 
-    /// Le hub autorise la collecte d'une unité.
+    /// The hub allows collecting one unit.
     CollectGranted {
         position: Position,
         kind: ResourceKind,
         remaining: u32,
     },
 
-    /// Le hub refuse la collecte.
+    /// The hub denies the collect.
     CollectDenied { position: Position },
 
-    /// Demande d'arrêt propre du robot.
+    /// Request a clean shutdown of the robot.
     Shutdown,
 }
 
-/// Commandes envoyées par l'UI vers la simulation.
+/// Commands sent by the UI to the simulation.
 #[derive(Debug, Clone)]
 pub enum SimulationCommand {
     Shutdown,

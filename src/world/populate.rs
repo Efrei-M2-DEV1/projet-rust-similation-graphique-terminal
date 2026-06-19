@@ -1,17 +1,9 @@
-//! Placement des ressources Energy / Crystal.
+//! Energy / Crystal resource placement.
 //!
-//! Correction importante :
-//! les ressources ne sont plus placées sur n'importe quelle case vide.
-//! Elles sont placées uniquement sur des cases accessibles depuis la base.
-//!
-//! Pourquoi ?
-//! Dans une carte générée avec du bruit de Perlin, certaines zones peuvent être
-//! isolées par des obstacles. Si une ressource apparaît dans une zone isolée,
-//! les scouts peuvent parfois la voir, mais les collectors ne peuvent pas
-//! forcément l'atteindre.
-//!
-//! Pour une simulation fiable et démontrable, on garantit donc que les ressources
-//! sont placées sur des cases atteignables depuis la base.
+//! Resources are only placed on cells reachable from the base (BFS). A Perlin
+//! map can have pockets sealed by obstacles; placing a resource there would make
+//! it impossible for collectors to reach, so we restrict placement to the
+//! reachable region.
 
 use std::collections::{HashSet, VecDeque};
 
@@ -24,18 +16,11 @@ use crate::world::map::Map;
 use crate::world::resource::{Resource, ResourceKind};
 use crate::world::tile::Tile;
 
-/// Paramètres de peuplement.
+/// Placement parameters.
 #[derive(Debug, Clone, Copy)]
 pub struct PopulateParams {
     pub energy_count: usize,
     pub crystal_count: usize,
-
-    /// Conservé pour compatibilité avec l'ancienne version.
-    ///
-    /// Dans cette nouvelle version, on ne fait plus des tentatives aléatoires
-    /// jusqu'à tomber sur une bonne case : on calcule d'abord les cases
-    /// atteignables, puis on pioche dedans.
-    pub max_attempts_per_resource: usize,
 }
 
 impl Default for PopulateParams {
@@ -43,29 +28,21 @@ impl Default for PopulateParams {
         Self {
             energy_count: 12,
             crystal_count: 8,
-            max_attempts_per_resource: 200,
         }
     }
 }
 
 impl Map {
-    /// Peuple la carte avec des ressources atteignables depuis la base.
-    ///
-    /// Renvoie le nombre total de ressources effectivement posées.
+    /// Populates the map with resources reachable from the base.
+    /// Returns the number of resources actually placed.
     pub fn populate_resources(&mut self, seed: u64) -> usize {
         self.populate_resources_with(seed, PopulateParams::default())
     }
 
-    /// Variante paramétrable de [`Map::populate_resources`].
+    /// Parameterised variant of [`Map::populate_resources`].
     pub fn populate_resources_with(&mut self, seed: u64, params: PopulateParams) -> usize {
         let mut rng = StdRng::seed_from_u64(seed);
 
-        // On lit volontairement ce champ pour éviter un warning,
-        // même si la nouvelle logique n'en a plus besoin.
-        let _max_attempts = params.max_attempts_per_resource;
-
-        // On calcule toutes les cases vides atteignables depuis la base.
-        // C'est LA différence essentielle avec l'ancienne version.
         let mut candidates = self.reachable_empty_positions_from_base();
 
         let mut placed = 0;
@@ -87,10 +64,7 @@ impl Map {
         placed
     }
 
-    /// Calcule les cases vides accessibles depuis la base avec un parcours BFS.
-    ///
-    /// BFS = Breadth-First Search.
-    /// On explore progressivement les cases franchissables autour de la base.
+    /// Empty cells reachable from the base, found with a breadth-first search.
     fn reachable_empty_positions_from_base(&self) -> Vec<Position> {
         let mut visited = HashSet::<Position>::new();
         let mut queue = VecDeque::<Position>::new();
@@ -127,7 +101,7 @@ impl Map {
         reachable_empty
     }
 
-    /// Place un certain type de ressource dans la liste de positions atteignables.
+    /// Places `count` resources of one kind among the reachable candidates.
     fn place_kind_from_candidates<R: Rng>(
         &mut self,
         rng: &mut R,
@@ -145,7 +119,7 @@ impl Map {
             let index = rng.gen_range(0..candidates.len());
             let position = candidates.swap_remove(index);
 
-            // Double sécurité : on ne place que sur une case encore vide.
+            // Only place on a still-empty cell.
             if !matches!(self.get(position), Some(Tile::Empty)) {
                 continue;
             }

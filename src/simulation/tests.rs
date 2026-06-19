@@ -1,12 +1,8 @@
-//! Tests du moteur de simulation concurrent.
+//! Concurrent simulation engine tests.
 //!
-//! Ces tests ne vérifient pas seulement des fonctions isolées.
-//! Ils vérifient que la simulation démarre réellement, produit des snapshots,
-//! fait progresser les ticks et permet aux collectors de collecter/déposer.
-//!
-//! C'est important pour le projet, car le sujet attend une architecture
-//! concurrente avec robots indépendants, communication asynchrone et interface
-//! temps réel.
+//! These tests do more than check isolated functions: they verify that the
+//! simulation actually starts, produces snapshots, advances ticks and lets
+//! collectors collect and deposit.
 
 use std::time::{Duration, Instant};
 
@@ -18,10 +14,10 @@ use crate::utils::Position;
 use crate::world::resource::Resource;
 use crate::world::{Map, ResourceKind, Tile};
 
-/// Attend le premier snapshot disponible.
+/// Waits for the first available snapshot.
 ///
-/// Si aucun snapshot n'arrive dans le temps imparti, le test échoue.
-/// Cela évite qu'un test reste bloqué indéfiniment.
+/// Fails the test if no snapshot arrives within the allotted time, so a test
+/// never blocks forever.
 fn wait_for_snapshot(handle: &SimulationHandle, timeout: Duration) -> SimulationSnapshot {
     let deadline = Instant::now() + timeout;
 
@@ -34,18 +30,16 @@ fn wait_for_snapshot(handle: &SimulationHandle, timeout: Duration) -> Simulation
             }
 
             Err(error) => {
-                panic!("aucun snapshot recu avant le timeout: {error:?}");
+                panic!("no snapshot received before timeout: {error:?}");
             }
         }
     }
 }
 
-/// Attend jusqu'à ce qu'un snapshot respecte une condition donnée.
-///
-/// Exemple :
-/// - attendre que le tick augmente ;
-/// - attendre qu'au moins une énergie soit collectée ;
-/// - attendre que les deux types de ressources soient collectés.
+/// Waits until a snapshot satisfies a given condition, e.g.:
+/// - wait for the tick to increase;
+/// - wait for at least one energy to be collected;
+/// - wait for both resource kinds to be collected.
 fn wait_until<F>(
     handle: &SimulationHandle,
     timeout: Duration,
@@ -78,7 +72,7 @@ where
     }
 
     panic!(
-        "condition non atteinte avant timeout. Dernier snapshot: {:?}",
+        "condition not met before timeout. Last snapshot: {:?}",
         last_snapshot
     );
 }
@@ -100,7 +94,7 @@ fn simulation_emits_snapshot_with_configured_robots() {
     assert_eq!(
         snapshot.robots.len(),
         4,
-        "la simulation doit contenir 2 scouts + 2 collectors"
+        "the simulation must contain 2 scouts + 2 collectors"
     );
 
     let scout_count = snapshot
@@ -123,7 +117,7 @@ fn simulation_emits_snapshot_with_configured_robots() {
             .resources
             .iter()
             .any(|resource| resource.kind == ResourceKind::Energy),
-        "le snapshot doit contenir au moins une ressource d'energie"
+        "the snapshot must contain at least one energy resource"
     );
 
     assert!(
@@ -131,7 +125,7 @@ fn simulation_emits_snapshot_with_configured_robots() {
             .resources
             .iter()
             .any(|resource| resource.kind == ResourceKind::Crystal),
-        "le snapshot doit contenir au moins un cristal"
+        "the snapshot must contain at least one crystal"
     );
 }
 
@@ -152,19 +146,15 @@ fn simulation_tick_progresses_over_time() {
 
     assert!(
         later.tick > first.tick,
-        "le tick doit progresser pendant que la simulation tourne"
+        "the tick must progress while the simulation runs"
     );
 }
 
 #[test]
 fn collectors_can_collect_and_deposit_energy_and_crystal() {
-    // Carte contrôlée pour éviter un test fragile.
-    // On place volontairement une énergie et un cristal proches de la base.
-    //
-    // Comme les ressources sont proches :
-    // - le scout les découvre rapidement ;
-    // - les collectors les reçoivent via le hub ;
-    // - ils peuvent collecter puis déposer à la base.
+    // Controlled map to avoid a flaky test. An energy and a crystal are placed
+    // close to the base so the scout discovers them quickly, the collectors
+    // receive them via the hub, then collect and deposit at the base.
     let mut map = Map::empty(15, 15);
     let base = map.base();
 
@@ -191,11 +181,11 @@ fn collectors_can_collect_and_deposit_energy_and_crystal() {
 
     assert!(
         snapshot.collected_energy > 0,
-        "au moins une unite d'energie doit etre collectee et deposee"
+        "at least one energy unit must be collected and deposited"
     );
 
     assert!(
         snapshot.collected_crystals > 0,
-        "au moins un cristal doit etre collecte et depose"
+        "at least one crystal must be collected and deposited"
     );
 }

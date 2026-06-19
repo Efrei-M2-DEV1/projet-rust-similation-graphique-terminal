@@ -1,18 +1,18 @@
-//! Rendu Ratatui.
+//! Ratatui rendering.
 //!
-//! Cette couche ne modifie aucun état.
-//! Elle transforme un `SimulationSnapshot` en interface terminal.
+//! This layer never mutates any state. It turns a `SimulationSnapshot` into a
+//! terminal interface.
 //!
-//! Important pour l'architecture :
-//! - l'UI ne pilote pas les robots ;
-//! - l'UI ne modifie pas la carte ;
-//! - l'UI affiche seulement le dernier snapshot reçu.
+//! Architecture note:
+//! - the UI does not drive the robots;
+//! - the UI does not modify the map;
+//! - the UI only renders the latest received snapshot.
 //!
-//! Cette version ajoute un "wow effect" utile :
-//! - barres de progression énergie/cristaux ;
-//! - panneau Robot Fleet ;
-//! - Event Log plus lisible ;
-//! - légende intégrée.
+//! It draws:
+//! - energy/crystal progress bars;
+//! - a Robot Fleet panel;
+//! - a readable Event Log;
+//! - an embedded legend.
 
 use std::collections::HashSet;
 
@@ -375,7 +375,7 @@ fn robot_short_label(robot: &crate::robots::RobotSnapshot) -> Span<'static> {
         .map(|cargo| format!(" {}{}", resource_short_label(cargo.kind), cargo.amount))
         .unwrap_or_default();
 
-    let label = format!("R{} {} {:>9}{}", robot.id.0, kind, robot.state, cargo);
+    let label = format!("R{} {} {:>9}{}", robot.id.0, kind, robot.state.label(), cargo);
 
     let color = match robot.kind {
         RobotKind::Scout => Color::Red,

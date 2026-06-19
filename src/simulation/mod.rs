@@ -1,39 +1,31 @@
-//! Moteur de simulation concurrent.
+//! Concurrent simulation engine.
 //!
-//! Architecture :
-//! - l'UI Ratatui tourne dans le thread principal ;
-//! - le hub tourne dans un thread dédié ;
-//! - chaque robot tourne dans son propre thread ;
-//! - tout le monde communique par channels.
+//! - the Ratatui UI runs on the main thread;
+//! - the hub runs on a dedicated thread and owns the global state;
+//! - each robot runs on its own thread;
+//! - everyone communicates through channels.
 //!
-//! Le hub possède l'état global officiel :
-//! - ressources restantes ;
-//! - compteurs collectés ;
-//! - positions des robots ;
-//! - connaissances agrégées ;
-//! - journal d'événements.
-//!
-//! Correction importante :
-//! on ne diffuse plus la connaissance globale en boucle toutes les 5 ms.
-//! On la diffuse uniquement quand elle change, puis au moment du tick.
-//! Cela évite d'inonder les robots avec des messages Knowledge répétitifs.
+//! The map is shared as `Arc<Mutex<Map>>`: robots lock it briefly to read, and
+//! the hub locks it to remove a resource unit on collect.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
 use crate::communication::{HubToRobot, KnownResource, RobotId, RobotToHub, SimulationCommand};
-use crate::robots::{CarriedResource, CollectorRobot, RobotKind, RobotSnapshot, ScoutRobot};
+use crate::robots::{
+    CarriedResource, CollectorRobot, RobotKind, RobotSnapshot, RobotState, ScoutRobot,
+};
 use crate::utils::Position;
 use crate::world::{Map, ResourceKind, Tile};
 
 const TICK_RATE: Duration = Duration::from_millis(120);
 const EVENT_LOG_LIMIT: usize = 10;
 
-/// Ressource affichable dans l'UI.
+/// Resource displayable in the UI.
 #[derive(Debug, Clone)]
 pub struct ResourceView {
     pub position: Position,
@@ -41,10 +33,8 @@ pub struct ResourceView {
     pub quantity: u32,
 }
 
-/// Snapshot complet envoyé à Ratatui.
-///
-/// L'UI ne manipule pas la simulation vivante.
-/// Elle reçoit seulement cette structure prête à afficher.
+/// Displayable snapshot sent to Ratatui. The UI never touches the live
+/// simulation; it only renders this ready-made structure.
 #[derive(Debug, Clone)]
 pub struct SimulationSnapshot {
     pub tick: u64,
@@ -61,7 +51,7 @@ pub struct SimulationSnapshot {
     pub events: Vec<String>,
 }
 
-/// Moteur de simulation à configurer avant lancement.
+/// Simulation engine, configured before launch.
 pub struct SimulationEngine {
     map: Map,
     scout_count: usize,
@@ -78,7 +68,7 @@ impl SimulationEngine {
     }
 
     pub fn start(self) -> SimulationHandle {
-        let map = Arc::new(self.map);
+        let map = Arc::new(Mutex::new(self.map));
 
         // Channel robots -> hub.
         let (robot_tx, robot_rx) = unbounded::<RobotToHub>();
@@ -93,10 +83,10 @@ impl SimulationEngine {
         let mut robot_handles = Vec::<JoinHandle<()>>::new();
         let mut initial_robots = Vec::<RobotSnapshot>::new();
 
-        let base = map.base();
+        let base = map.lock().expect("map mutex poisoned").base();
         let mut next_id = 0usize;
 
-        // Création des scouts.
+        // Scouts.
         for index in 0..self.scout_count {
             let id = RobotId(next_id);
             next_id += 1;
@@ -109,7 +99,7 @@ impl SimulationEngine {
                 kind: RobotKind::Scout,
                 position: base,
                 cargo: None,
-                state: "exploring",
+                state: RobotState::Exploring,
             });
 
             let scout = ScoutRobot::new(
@@ -124,7 +114,7 @@ impl SimulationEngine {
             robot_handles.push(thread::spawn(move || scout.run()));
         }
 
-        // Création des collectors.
+        // Collectors.
         for _ in 0..self.collector_count {
             let id = RobotId(next_id);
             next_id += 1;
@@ -137,7 +127,7 @@ impl SimulationEngine {
                 kind: RobotKind::Collector,
                 position: base,
                 cargo: None,
-                state: "waiting",
+                state: RobotState::Waiting,
             });
 
             let collector =
@@ -168,7 +158,7 @@ impl SimulationEngine {
     }
 }
 
-/// Objet gardé par l'UI pour recevoir les snapshots et arrêter la simulation.
+/// Handle kept by the UI to receive snapshots and stop the simulation.
 pub struct SimulationHandle {
     pub snapshot_rx: Receiver<SimulationSnapshot>,
     command_tx: Sender<SimulationCommand>,
@@ -197,7 +187,7 @@ impl Drop for SimulationHandle {
 }
 
 fn run_hub(
-    map: Arc<Map>,
+    map: Arc<Mutex<Map>>,
     robot_rx: Receiver<RobotToHub>,
     robot_senders: HashMap<RobotId, Sender<HubToRobot>>,
     snapshot_tx: Sender<SimulationSnapshot>,
@@ -206,23 +196,18 @@ fn run_hub(
 ) {
     let mut tick = 0_u64;
 
-    let obstacle_positions = map
-        .iter()
-        .filter_map(|(position, tile)| {
-            if matches!(tile, Tile::Obstacle) {
-                Some(position)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
+    // The terrain never changes, so read these fixed facts once.
+    let (base, width, height, obstacle_positions) = {
+        let guard = map.lock().expect("map mutex poisoned");
+        let obstacles = guard
+            .iter()
+            .filter_map(|(position, tile)| matches!(tile, Tile::Obstacle).then_some(position))
+            .collect::<Vec<_>>();
+        (guard.base(), guard.width(), guard.height(), obstacles)
+    };
 
-    // Ressources officielles restantes.
-    // C'est ici que le hub décrémente les quantités quand un collector collecte.
-    let mut resources = collect_initial_resources(&map);
-
-    // Connaissance globale découverte par les robots.
-    // Au départ, elle est vide : les robots doivent découvrir.
+    // Global knowledge discovered by the robots (empty at first). Resource
+    // quantities themselves live in the map and are decremented on collect.
     let mut known_resources = HashMap::<Position, KnownResource>::new();
     let mut known_obstacles = HashSet::<Position>::new();
 
@@ -240,9 +225,6 @@ fn run_hub(
 
     let mut last_tick = Instant::now();
 
-    // La connaissance est marquée dirty quand quelque chose change.
-    // On ne la diffuse pas en permanence, seulement quand c'est utile.
-
     loop {
         if let Ok(SimulationCommand::Shutdown) = command_rx.try_recv() {
             for tx in robot_senders.values() {
@@ -251,15 +233,15 @@ fn run_hub(
             break;
         }
 
-        // On traite tous les messages robots disponibles sans bloquer.
+        // Drain all pending robot messages without blocking.
         while let Ok(message) = robot_rx.try_recv() {
             let _changed_knowledge = handle_robot_message(
                 message,
                 &map,
+                base,
                 &robot_senders,
                 &mut robot_states,
                 &mut occupied,
-                &mut resources,
                 &mut known_resources,
                 &mut known_obstacles,
                 &mut collected_energy,
@@ -268,23 +250,12 @@ fn run_hub(
             );
         }
 
-        // Toutes les 120 ms : nouveau tick de simulation.
+        // New simulation tick every 120 ms.
         if last_tick.elapsed() >= TICK_RATE {
             tick = tick.wrapping_add(1);
 
-            // Si de nouvelles ressources/obstacles ont été découverts,
-            // on diffuse la connaissance à tous les robots juste avant le tick.
-            // Ainsi, les collectors peuvent utiliser ces infos dès leur prochain tour.
-            // À chaque tick, le hub rediffuse la connaissance globale actuelle.
-            //
-            // Pourquoi ?
-            // - c'est simple à expliquer ;
-            // - ce n'est pas trop coûteux : environ 8 fois par seconde ;
-            // - cela garantit que les collectors reçoivent bien les ressources découvertes ;
-            // - cela évite qu'un collector reste bloqué avec une connaissance vide.
-            //
-            // Ce n'est PAS un flood comme avant : on le fait seulement au rythme du tick,
-            // pas en boucle toutes les 5 ms.
+            // Re-broadcast the current global knowledge at tick rate so
+            // collectors always have the latest discoveries.
             broadcast_knowledge(&robot_senders, &known_resources, &known_obstacles);
 
             for tx in robot_senders.values() {
@@ -295,7 +266,9 @@ fn run_hub(
                 &map,
                 tick,
                 &obstacle_positions,
-                &resources,
+                base,
+                width,
+                height,
                 &robot_states,
                 collected_energy,
                 collected_crystals,
@@ -309,39 +282,21 @@ fn run_hub(
             last_tick = Instant::now();
         }
 
-        // Petite pause pour éviter une boucle CPU à 100%.
+        // Small pause to avoid a 100% CPU busy loop.
         thread::sleep(Duration::from_millis(5));
     }
 }
 
-fn collect_initial_resources(map: &Map) -> HashMap<Position, KnownResource> {
-    map.iter()
-        .filter_map(|(position, tile)| match tile {
-            Tile::Resource(resource) => Some((
-                position,
-                KnownResource {
-                    position,
-                    kind: resource.kind,
-                    quantity: resource.quantity,
-                },
-            )),
-            _ => None,
-        })
-        .collect()
-}
-
-/// Traite un message envoyé par un robot.
-///
-/// Retourne true si la connaissance globale a changé.
-/// Cela permet au hub de savoir s'il doit rediffuser Knowledge aux robots.
+/// Handles a message sent by a robot.
+/// Returns true if the global knowledge changed (so the hub re-broadcasts it).
 #[allow(clippy::too_many_arguments)]
 fn handle_robot_message(
     message: RobotToHub,
-    map: &Map,
+    map: &Mutex<Map>,
+    base: Position,
     robot_senders: &HashMap<RobotId, Sender<HubToRobot>>,
     robot_states: &mut HashMap<RobotId, RobotSnapshot>,
     occupied: &mut HashMap<Position, RobotId>,
-    resources: &mut HashMap<Position, KnownResource>,
     known_resources: &mut HashMap<Position, KnownResource>,
     known_obstacles: &mut HashSet<Position>,
     collected_energy: &mut u32,
@@ -355,12 +310,21 @@ fn handle_robot_message(
             kind,
             quantity,
         } => {
-            let Some(actual) = resources.get(&position).copied() else {
-                return false;
+            let actual = match map
+                .lock()
+                .expect("map mutex poisoned")
+                .get(position)
+                .copied()
+            {
+                Some(Tile::Resource(resource)) => KnownResource {
+                    position,
+                    kind: resource.kind,
+                    quantity: resource.quantity,
+                },
+                _ => return false,
             };
 
-            // On vérifie si cette ressource était déjà connue avec les mêmes infos.
-            // Cela évite de logguer 100 fois la même découverte.
+            // Skip if already known with the same data (avoids log spam).
             let changed = known_resources.get(&position) != Some(&actual);
             known_resources.insert(position, actual);
 
@@ -396,8 +360,11 @@ fn handle_robot_message(
         }
 
         RobotToHub::ObstacleDiscovered { robot_id, position } => {
-            let changed = matches!(map.get(position), Some(Tile::Obstacle))
-                && known_obstacles.insert(position);
+            let is_obstacle = matches!(
+                map.lock().expect("map mutex poisoned").get(position),
+                Some(Tile::Obstacle)
+            );
+            let changed = is_obstacle && known_obstacles.insert(position);
 
             if changed {
                 push_event(
@@ -420,41 +387,30 @@ fn handle_robot_message(
 
             let one_step = current == to || current.manhattan(to) == 1;
 
-            // Correction importante :
-            // on ne considère plus les autres robots comme des murs infranchissables.
-            //
-            // Pourquoi ?
-            // Dans une simulation concurrente avec plusieurs robots, les couloirs étroits
-            // créent facilement des blocages : R4 attend R5, R5 attend R6, etc.
-            // Pour la démo, c'est très mauvais.
-            //
-            // On garde donc les obstacles de la carte comme contraintes fortes,
-            // mais les robots ne bloquent plus définitivement les autres robots.
-            // Cela rend la simulation non bloquante et beaucoup plus dynamique.
-            let valid = one_step && map.is_walkable(to);
+            // Map obstacles are hard constraints; other robots are not, so the
+            // simulation never deadlocks in narrow corridors.
+            let walkable = map.lock().expect("map mutex poisoned").is_walkable(to);
+            let valid = one_step && walkable;
 
             if valid {
-                if current != map.base() {
+                if current != base {
                     occupied.remove(&current);
                 }
 
-                // On ne stocke plus l'occupation comme contrainte dure.
-                // Le HashMap reste présent pour compatibilité avec le reste du code,
-                // mais il ne sert plus à refuser les mouvements.
-                if to != map.base() {
+                if to != base {
                     occupied.insert(to, robot_id);
                 }
 
                 if let Some(robot) = robot_states.get_mut(&robot_id) {
                     robot.position = to;
 
-                    if robot.kind == RobotKind::Scout {
-                        robot.state = "exploring";
+                    robot.state = if robot.kind == RobotKind::Scout {
+                        RobotState::Exploring
                     } else if robot.cargo.is_some() {
-                        robot.state = "to base";
+                        RobotState::ReturningToBase
                     } else {
-                        robot.state = "moving";
-                    }
+                        RobotState::Moving
+                    };
                 }
 
                 send_to_robot(robot_senders, robot_id, HubToRobot::MoveGranted { to });
@@ -485,52 +441,44 @@ fn handle_robot_message(
                 return false;
             }
 
-            let Some(resource_before) = resources.get(&position).copied() else {
+            // The hub locks the map and removes one unit. This is the single
+            // writer; robots only ever read the map.
+            let taken = map
+                .lock()
+                .expect("map mutex poisoned")
+                .take_resource_unit(position);
+
+            let Some((kind, remaining)) = taken else {
+                known_resources.remove(&position);
                 send_to_robot(
                     robot_senders,
                     robot_id,
                     HubToRobot::CollectDenied { position },
                 );
-                return false;
+                return true;
             };
 
-            if resource_before.quantity == 0 {
-                resources.remove(&position);
-                known_resources.remove(&position);
-
-                send_to_robot(
-                    robot_senders,
-                    robot_id,
-                    HubToRobot::CollectDenied { position },
-                );
-
-                return true;
-            }
-
-            let remaining = resource_before.quantity - 1;
-
             if remaining == 0 {
-                resources.remove(&position);
                 known_resources.remove(&position);
             } else {
-                let updated = KnownResource {
+                known_resources.insert(
                     position,
-                    kind: resource_before.kind,
-                    quantity: remaining,
-                };
-
-                resources.insert(position, updated);
-                known_resources.insert(position, updated);
+                    KnownResource {
+                        position,
+                        kind,
+                        quantity: remaining,
+                    },
+                );
             }
 
-            add_cargo_to_snapshot(robot_states, robot_id, resource_before.kind);
+            add_cargo_to_snapshot(robot_states, robot_id, kind);
 
             send_to_robot(
                 robot_senders,
                 robot_id,
                 HubToRobot::CollectGranted {
                     position,
-                    kind: resource_before.kind,
+                    kind,
                     remaining,
                 },
             );
@@ -540,7 +488,7 @@ fn handle_robot_message(
                 format!(
                     "R{} collecte 1 {} en ({}, {})",
                     robot_id.0,
-                    resource_label(resource_before.kind),
+                    resource_label(kind),
                     position.x,
                     position.y
                 ),
@@ -551,7 +499,7 @@ fn handle_robot_message(
                     events,
                     format!(
                         "Depot de {} epuise en ({}, {})",
-                        resource_label(resource_before.kind),
+                        resource_label(kind),
                         position.x,
                         position.y
                     ),
@@ -573,7 +521,7 @@ fn handle_robot_message(
 
             if let Some(robot) = robot_states.get_mut(&robot_id) {
                 robot.cargo = None;
-                robot.state = "waiting";
+                robot.state = RobotState::Waiting;
             }
 
             push_event(
@@ -618,7 +566,7 @@ fn add_cargo_to_snapshot(
         }
     }
 
-    robot.state = "carrying";
+    robot.state = RobotState::Carrying;
 }
 
 fn send_to_robot(
@@ -649,10 +597,12 @@ fn broadcast_knowledge(
 
 #[allow(clippy::too_many_arguments)]
 fn build_snapshot(
-    map: &Map,
+    map: &Mutex<Map>,
     tick: u64,
     obstacles: &[Position],
-    resources: &HashMap<Position, KnownResource>,
+    base: Position,
+    width: usize,
+    height: usize,
     robots: &HashMap<RobotId, RobotSnapshot>,
     collected_energy: u32,
     collected_crystals: u32,
@@ -660,23 +610,32 @@ fn build_snapshot(
     known_obstacles: usize,
     events: &[String],
 ) -> SimulationSnapshot {
+    // Read the remaining resources straight from the map (the source of truth).
+    let resources = {
+        let guard = map.lock().expect("map mutex poisoned");
+        guard
+            .iter()
+            .filter_map(|(position, tile)| match tile {
+                Tile::Resource(resource) => Some(ResourceView {
+                    position,
+                    kind: resource.kind,
+                    quantity: resource.quantity,
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
     let mut robot_list = robots.values().cloned().collect::<Vec<_>>();
     robot_list.sort_by_key(|robot| robot.id);
 
     SimulationSnapshot {
         tick,
-        width: map.width(),
-        height: map.height(),
-        base: map.base(),
+        width,
+        height,
+        base,
         obstacles: obstacles.to_vec(),
-        resources: resources
-            .values()
-            .map(|resource| ResourceView {
-                position: resource.position,
-                kind: resource.kind,
-                quantity: resource.quantity,
-            })
-            .collect(),
+        resources,
         robots: robot_list,
         collected_energy,
         collected_crystals,

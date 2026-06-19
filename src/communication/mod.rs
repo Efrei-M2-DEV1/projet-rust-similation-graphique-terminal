@@ -1,13 +1,12 @@
-//! Module de communication.
+//! Communication module.
 //!
-//! Dans cette refonte, la communication repose sur des messages typés.
-//! Les robots ne modifient pas directement l'état global :
-//! ils envoient des messages au hub de simulation.
+//! Communication relies on typed messages. Robots never mutate the global
+//! state directly: they send messages to the simulation hub.
 //!
-//! Cette séparation permet de défendre clairement une architecture concurrente :
-//! - les robots tournent dans leurs propres threads ;
-//! - le hub centralise l'état global ;
-//! - l'UI reçoit des snapshots prêts à afficher.
+//! This separation makes the concurrent architecture easy to reason about:
+//! - robots run in their own threads;
+//! - the hub centralizes the global state;
+//! - the UI receives ready-to-render snapshots.
 
 pub mod message;
 

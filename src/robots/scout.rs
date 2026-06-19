@@ -1,12 +1,9 @@
-//! Robot éclaireur.
+//! Scout robot.
 //!
-//! Responsabilités :
-//! - explorer aléatoirement ;
-//! - observer son environnement proche ;
-//! - signaler les ressources et obstacles au hub ;
-//! - ne jamais collecter.
+//! Explores at random, observes its surroundings, reports resources and
+//! obstacles to the hub, and never collects.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::{Receiver, Sender};
 use rand::rngs::StdRng;
@@ -16,20 +13,16 @@ use rand::SeedableRng;
 use crate::communication::{HubToRobot, RobotId, RobotToHub};
 use crate::robots::common::{visible_positions, LocalKnowledge};
 use crate::utils::Position;
-use crate::world::Map;
+use crate::world::{Map, Tile};
 
-/// Rayon de perception locale du scout.
-///
-/// 2 reste une connaissance locale : le robot ne voit pas toute la carte.
-/// Mais cela évite une simulation trop lente où les collectors attendent longtemps
-/// avant de recevoir une ressource connue.
+/// Local scan radius of the scout (kept small so knowledge stays local).
 pub const SCOUT_SCAN_RADIUS: i32 = 2;
 
 pub struct ScoutRobot {
     id: RobotId,
     position: Position,
     knowledge: LocalKnowledge,
-    map: Arc<Map>,
+    map: Arc<Mutex<Map>>,
     to_hub: Sender<RobotToHub>,
     from_hub: Receiver<HubToRobot>,
     rng: StdRng,
@@ -40,7 +33,7 @@ impl ScoutRobot {
     pub fn new(
         id: RobotId,
         start: Position,
-        map: Arc<Map>,
+        map: Arc<Mutex<Map>>,
         to_hub: Sender<RobotToHub>,
         from_hub: Receiver<HubToRobot>,
         seed: u64,
@@ -57,10 +50,8 @@ impl ScoutRobot {
         }
     }
 
-    /// Boucle principale du robot.
-    ///
-    /// Cette fonction tourne dans un thread dédié.
-    /// Le scout ne fait rien tant que le hub ne lui envoie pas un Tick.
+    /// Main loop, runs in a dedicated thread. The scout stays idle until the
+    /// hub sends a Tick.
     pub fn run(mut self) {
         while let Ok(message) = self.from_hub.recv() {
             match message {
@@ -85,7 +76,7 @@ impl ScoutRobot {
                 HubToRobot::Shutdown => break,
 
                 HubToRobot::CollectGranted { .. } | HubToRobot::CollectDenied { .. } => {
-                    // Un scout ne collecte jamais.
+                    // A scout never collects.
                 }
             }
         }
@@ -100,11 +91,17 @@ impl ScoutRobot {
     }
 
     fn scan_surroundings(&mut self) {
-        for position in visible_positions(self.position, SCOUT_SCAN_RADIUS, &self.map) {
-            let Some(tile) = self.map.get(position).copied() else {
-                continue;
-            };
+        // Lock the shared map briefly to read the visible tiles, then release
+        // it before sending any message.
+        let observations: Vec<(Position, Tile)> = {
+            let map = self.map.lock().expect("map mutex poisoned");
+            visible_positions(self.position, SCOUT_SCAN_RADIUS, &map)
+                .into_iter()
+                .filter_map(|position| map.get(position).copied().map(|tile| (position, tile)))
+                .collect()
+        };
 
+        for (position, tile) in observations {
             if self.knowledge.observe_obstacle(position, tile) {
                 let _ = self.to_hub.send(RobotToHub::ObstacleDiscovered {
                     robot_id: self.id,
@@ -124,13 +121,16 @@ impl ScoutRobot {
     }
 
     fn request_random_move(&mut self) {
-        let mut candidates = self
-            .position
-            .neighbors4()
-            .into_iter()
-            .filter(|position| self.map.is_walkable(*position))
-            .filter(|position| !self.knowledge.is_known_obstacle(*position))
-            .collect::<Vec<_>>();
+        let known_obstacles = self.knowledge.obstacles().clone();
+        let mut candidates = {
+            let map = self.map.lock().expect("map mutex poisoned");
+            self.position
+                .neighbors4()
+                .into_iter()
+                .filter(|position| map.is_walkable(*position))
+                .filter(|position| !known_obstacles.contains(position))
+                .collect::<Vec<_>>()
+        };
 
         candidates.shuffle(&mut self.rng);
 

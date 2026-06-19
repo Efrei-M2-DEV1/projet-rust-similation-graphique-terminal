@@ -1,9 +1,7 @@
-//! Génération procédurale d'une [`Map`] à partir d'un bruit de Perlin.
+//! Procedural [`Map`] generation from Perlin noise.
 //!
-//! Approche :
-//! 1. On évalue Perlin sur chaque case (x, y) avec une fréquence donnée.
-//! 2. Au-dessus d'un seuil → obstacle, sinon case libre.
-//! 3. La base centrale et ses voisines sont toujours libres (spawn safe).
+//! For each cell we sample Perlin: above a threshold it becomes an obstacle.
+//! The base and its immediate neighbours always stay clear (safe spawn).
 
 use noise::{NoiseFn, Perlin};
 
@@ -11,16 +9,14 @@ use crate::utils::Position;
 use crate::world::map::Map;
 use crate::world::tile::Tile;
 
-/// Paramètres de génération (valeurs par défaut raisonnables pour
-/// obtenir ~25 % d'obstacles avec des amas naturels).
+/// Generation parameters (defaults give ~25% obstacles in natural clusters).
 #[derive(Debug, Clone, Copy)]
 pub struct GenParams {
-    /// Fréquence d'échantillonnage du bruit (plus haut = obstacles plus
-    /// fragmentés ; plus bas = grandes nappes).
+    /// Noise sampling frequency (higher = more fragmented obstacles).
     pub frequency: f64,
-    /// Seuil au-dessus duquel le bruit devient un obstacle (-1.0..1.0).
+    /// Threshold above which a cell becomes an obstacle (-1.0..1.0).
     pub obstacle_threshold: f64,
-    /// Rayon (en cases) autour de la base à garder dégagé.
+    /// Radius (in cells) kept clear around the base.
     pub safe_radius: i32,
 }
 
@@ -35,23 +31,18 @@ impl Default for GenParams {
 }
 
 impl Map {
-    /// Génère une carte `width x height` avec obstacles Perlin pour la
-    /// graine `seed`. Les ressources seront placées dans un second temps
-    /// par [`Map::populate_resources`] (commit suivant).
+    /// Generates a `width x height` map with Perlin obstacles for `seed`.
+    /// Resources are placed afterwards by [`Map::populate_resources`].
     pub fn generate(width: usize, height: usize, seed: u32) -> Self {
         Self::generate_with(width, height, seed, GenParams::default())
     }
 
-    /// Variante paramétrable de [`Map::generate`].
+    /// Parameterised variant of [`Map::generate`].
     pub fn generate_with(width: usize, height: usize, seed: u32, params: GenParams) -> Self {
         let mut map = Map::empty(width, height);
         let perlin = Perlin::new(seed);
         let base = map.base();
 
-        // Double boucle : on parcourt chaque case (x, y) de la grille,
-        // on évalue le bruit de Perlin à cette position et on transforme
-        // la case en obstacle si la valeur dépasse le seuil.
-        // La zone autour de la base reste toujours libre (spawn safe).
         for y in 0..height as i32 {
             for x in 0..width as i32 {
                 let p = Position::new(x, y);
@@ -73,7 +64,7 @@ impl Map {
     }
 }
 
-/// Vrai si `p` est dans le carré de rayon `radius` autour de `base`.
+/// True if `p` is inside the square of side `2*radius` around `base`.
 fn is_in_safe_zone(p: Position, base: Position, radius: i32) -> bool {
     (p.x - base.x).abs() <= radius && (p.y - base.y).abs() <= radius
 }
@@ -87,8 +78,7 @@ mod tests {
         let map = Map::generate(40, 20, 7);
         let b = map.base();
 
-        // Double boucle : on vérifie chaque case du carré 5x5 centré
-        // sur la base (rayon 2 par défaut) — toutes doivent être libres.
+        // Every cell of the 5x5 square around the base (radius 2) must be free.
         for dy in -2..=2 {
             for dx in -2..=2 {
                 let p = Position::new(b.x + dx, b.y + dy);
