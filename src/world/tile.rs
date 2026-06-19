@@ -3,9 +3,10 @@
 use super::resource::Resource;
 
 /// État d'une case de la grille.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tile {
     /// Case libre, traversable.
+    #[default]
     Empty,
     /// Obstacle infranchissable — affiché `O` (cyan clair).
     Obstacle,
@@ -20,8 +21,9 @@ impl Tile {
     pub fn is_walkable(&self) -> bool {
         !matches!(self, Tile::Obstacle)
     }
-
+    // #[allow(dead_code)]
     /// Caractère ASCII utilisé pour le rendu.
+    #[allow(dead_code)]
     pub fn glyph(&self) -> char {
         match self {
             Tile::Empty => '.',
@@ -29,11 +31,5 @@ impl Tile {
             Tile::Base => '#',
             Tile::Resource(r) => r.kind.glyph(),
         }
-    }
-}
-
-impl Default for Tile {
-    fn default() -> Self {
-        Tile::Empty
     }
 }

@@ -13,6 +13,7 @@ pub enum ResourceKind {
 
 impl ResourceKind {
     /// Caractère utilisé pour le rendu terminal.
+    #[allow(dead_code)]
     pub const fn glyph(self) -> char {
         match self {
             ResourceKind::Energy => 'E',
@@ -46,6 +47,7 @@ impl Resource {
     }
 
     /// Prélève une unité ; renvoie `true` si une unité a été retirée.
+    #[allow(dead_code)]
     pub fn take_one(&mut self) -> bool {
         if self.quantity == 0 {
             false
@@ -55,6 +57,7 @@ impl Resource {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_depleted(&self) -> bool {
         self.quantity == 0
     }

@@ -60,10 +60,8 @@ impl Map {
                     continue;
                 }
 
-                let noise_value = perlin.get([
-                    x as f64 * params.frequency,
-                    y as f64 * params.frequency,
-                ]);
+                let noise_value =
+                    perlin.get([x as f64 * params.frequency, y as f64 * params.frequency]);
 
                 if noise_value > params.obstacle_threshold {
                     map.set(p, Tile::Obstacle);

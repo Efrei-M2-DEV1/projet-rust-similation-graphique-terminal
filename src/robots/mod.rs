@@ -1,16 +1,16 @@
 //! Robots autonomes de la simulation.
 //!
-//! Dev 2 couvre les comportements des eclaireurs, des collecteurs et la
-//! navigation. Les robots utilisent le hub de communication existant pour
-//! partager leurs decouvertes sans bloquer la boucle UI.
+//! Chaque robot tourne dans son propre thread.
+//! Il possède :
+//! - une position ;
+//! - une connaissance locale ;
+//! - un canal pour recevoir les messages du hub ;
+//! - un canal pour envoyer des messages au hub.
 
 mod collector;
 mod common;
 mod scout;
 
-pub use collector::{CollectorRobot, CollectorState, DEFAULT_COLLECTOR_CAPACITY};
-pub use common::{
-    visible_positions, CarriedResource, LocalKnowledge, Robot, RobotKind, RobotSnapshot,
-    RobotTickContext,
-};
+pub use collector::CollectorRobot;
+pub use common::{CarriedResource, RobotKind, RobotSnapshot};
 pub use scout::ScoutRobot;
