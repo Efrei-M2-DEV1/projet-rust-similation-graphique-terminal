@@ -268,6 +268,20 @@ robots
 affichage
 ```
 
+### Sûreté mémoire et absence de data races
+
+L’architecture est conçue pour être **sûre par construction** : le compilateur Rust garantit l’absence de data races, et le design renforce cette garantie.
+
+| Risque                 | Comment il est évité                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ |
+| Accès concurrent carte | La carte est partagée en lecture seule via `Arc<Map>`. Les obstacles ne changent jamais → aucun verrou nécessaire. |
+| Modification de l’état | Seul le **hub** possède l’état mutable (ressources, compteurs, positions). Les robots ne le modifient jamais directement. |
+| Collisions de robots   | Tout déplacement est **validé par le hub** (`MoveGranted` / `MoveDenied`) : deux robots ne peuvent pas occuper la même case. |
+| Blocages (deadlocks)   | Aucun `Mutex` partagé entre robots. La communication se fait uniquement par **channels** `crossbeam`.   |
+| Opérations bloquantes  | Le hub lit les messages avec `try_recv` (non-bloquant) ; il ne reste jamais bloqué en attente d’un robot lent. |
+
+En résumé : les robots **demandent**, le hub **décide**. Cette séparation supprime tout accès concurrent à un état partagé mutable, ce qui rend les data races impossibles sans recourir à des verrous coûteux.
+
 ---
 
 ## Interface Ratatui
