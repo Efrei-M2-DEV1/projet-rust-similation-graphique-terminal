@@ -1,14 +1,10 @@
-//! Structure `Map` : grille 2D de [`Tile`], accesseurs sûrs et requêtes
-//! géométriques. La génération procédurale est ajoutée dans un commit
-//! ultérieur (Perlin + placement des ressources).
+//! `Map`: 2D grid of [`Tile`] with bounds-checked access.
 
 use crate::utils::Position;
 use crate::world::resource::ResourceKind;
 use crate::world::tile::Tile;
 
-/// Carte du monde — grille rectangulaire `width x height` de [`Tile`].
-///
-/// Stockée en row-major : `tiles[y * width + x]`.
+/// World map, a `width x height` grid stored row-major (`tiles[y * width + x]`).
 #[derive(Debug, Clone)]
 pub struct Map {
     width: usize,
@@ -18,9 +14,7 @@ pub struct Map {
 }
 
 impl Map {
-    /// Crée une carte vide (toutes cases libres) de la taille demandée,
-    /// avec une base placée au centre. Utilisée pour les tests et comme
-    /// base pour la génération procédurale.
+    /// Empty map (all walkable) with the base at the center.
     pub fn empty(width: usize, height: usize) -> Self {
         assert!(width > 0 && height > 0, "dimensions de carte invalides");
         let mut tiles = vec![Tile::Empty; width * height];
@@ -45,7 +39,7 @@ impl Map {
         self.base
     }
 
-    /// Vérifie que la position est dans les bornes de la grille.
+    /// True if `p` is inside the grid.
     pub fn in_bounds(&self, p: Position) -> bool {
         p.x >= 0 && p.y >= 0 && (p.x as usize) < self.width && (p.y as usize) < self.height
     }
@@ -55,7 +49,7 @@ impl Map {
         p.y as usize * self.width + p.x as usize
     }
 
-    /// Accès en lecture (None si hors bornes).
+    /// Read access (None if out of bounds).
     pub fn get(&self, p: Position) -> Option<&Tile> {
         if self.in_bounds(p) {
             Some(&self.tiles[self.index(p)])
@@ -64,29 +58,40 @@ impl Map {
         }
     }
 
-    /// Accès en écriture (None si hors bornes).
-    #[allow(dead_code)]
-    pub fn get_mut(&mut self, p: Position) -> Option<&mut Tile> {
-        if self.in_bounds(p) {
-            let i = self.index(p);
-            Some(&mut self.tiles[i])
-        } else {
-            None
-        }
-    }
-
-    /// Place une tuile (panique si hors bornes — usage interne contrôlé).
+    /// Writes a tile (panics if out of bounds — controlled internal use).
     pub(crate) fn set(&mut self, p: Position, tile: Tile) {
         let i = self.index(p);
         self.tiles[i] = tile;
     }
 
-    /// Une position est-elle franchissable ?
+    /// Removes one unit from the resource at `position`.
+    ///
+    /// Returns `(kind, remaining)` after the take, or `None` if there is no
+    /// resource there. The tile becomes `Empty` once the deposit is exhausted.
+    /// This mutation is why the map is shared behind a `Mutex` in the engine.
+    pub fn take_resource_unit(&mut self, position: Position) -> Option<(ResourceKind, u32)> {
+        match self.get(position).copied()? {
+            Tile::Resource(mut resource) if resource.quantity > 0 => {
+                resource.quantity -= 1;
+                let result = (resource.kind, resource.quantity);
+                let tile = if resource.quantity == 0 {
+                    Tile::Empty
+                } else {
+                    Tile::Resource(resource)
+                };
+                self.set(position, tile);
+                Some(result)
+            }
+            _ => None,
+        }
+    }
+
+    /// True if `p` is walkable.
     pub fn is_walkable(&self, p: Position) -> bool {
         self.get(p).map(Tile::is_walkable).unwrap_or(false)
     }
 
-    /// Itère toutes les cases avec leur position.
+    /// Iterates over every tile with its position.
     pub fn iter(&self) -> impl Iterator<Item = (Position, &Tile)> {
         let w = self.width;
         self.tiles
@@ -95,7 +100,7 @@ impl Map {
             .map(move |(i, t)| (Position::new((i % w) as i32, (i / w) as i32), t))
     }
 
-    /// Compte les obstacles présents sur la carte.
+    /// Counts obstacles on the map.
     #[allow(dead_code)]
     pub fn count_obstacles(&self) -> usize {
         self.tiles
@@ -104,7 +109,7 @@ impl Map {
             .count()
     }
 
-    /// Compte les ressources d'un certain type.
+    /// Counts resource deposits of a given kind.
     #[allow(dead_code)]
     pub fn count_resources(&self, kind: ResourceKind) -> usize {
         self.tiles
@@ -112,15 +117,8 @@ impl Map {
             .filter(|t| matches!(t, Tile::Resource(r) if r.kind == kind))
             .count()
     }
-    /// Additionne les quantités restantes pour un type de ressource.
-    ///
-    /// Différence importante avec `count_resources` :
-    /// - `count_resources(ResourceKind::Energy)` compte le nombre de gisements E.
-    /// - `sum_resource_quantity(ResourceKind::Energy)` additionne les unités restantes.
-    ///
-    /// Exemple :
-    /// Si la carte contient 3 sources d'énergie de 50, 100 et 120 unités,
-    /// cette fonction renvoie 270.
+
+    /// Sums the remaining units across all deposits of a given kind.
     #[allow(dead_code)]
     pub fn sum_resource_quantity(&self, kind: ResourceKind) -> u32 {
         self.tiles

@@ -1,10 +1,4 @@
-//! Types communs aux robots.
-//!
-//! On regroupe ici ce qui est partagé entre scouts et collectors :
-//! - type de robot ;
-//! - snapshot affichable ;
-//! - connaissance locale ;
-//! - fonctions de visibilité.
+//! Types shared between scouts and collectors.
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,39 +6,55 @@ use crate::communication::{KnownResource, RobotId};
 use crate::utils::Position;
 use crate::world::Tile;
 
-/// Type métier d'un robot.
+/// Robot business type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RobotKind {
     Scout,
     Collector,
 }
 
-/// Ressource portée par un collecteur.
+/// Displayable robot activity. Used by the UI instead of raw `&str` literals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RobotState {
+    Exploring,
+    Waiting,
+    Moving,
+    ReturningToBase,
+    Carrying,
+}
+
+impl RobotState {
+    /// Short label shown in the UI.
+    pub const fn label(self) -> &'static str {
+        match self {
+            RobotState::Exploring => "exploring",
+            RobotState::Waiting => "waiting",
+            RobotState::Moving => "moving",
+            RobotState::ReturningToBase => "to base",
+            RobotState::Carrying => "carrying",
+        }
+    }
+}
+
+/// Resource carried by a collector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CarriedResource {
     pub kind: crate::world::ResourceKind,
     pub amount: u32,
 }
 
-/// Version affichable d'un robot.
-///
-/// L'UI ne manipule pas les vrais robots.
-/// Elle reçoit seulement des snapshots simples.
+/// Displayable view of a robot. The UI only ever sees snapshots, never the live
+/// robots running in their own threads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RobotSnapshot {
     pub id: RobotId,
     pub kind: RobotKind,
     pub position: Position,
     pub cargo: Option<CarriedResource>,
-    pub state: &'static str,
+    pub state: RobotState,
 }
 
-/// Connaissance locale d'un robot.
-///
-/// Chaque robot ne connaît pas toute la carte au départ.
-/// Il apprend progressivement grâce à :
-/// - ses observations ;
-/// - les messages diffusés par le hub.
+/// Local knowledge of a robot, learned from observations and hub broadcasts.
 #[derive(Debug, Default, Clone)]
 pub struct LocalKnowledge {
     resources: HashMap<Position, KnownResource>,
@@ -56,13 +66,8 @@ impl LocalKnowledge {
         &self.resources
     }
 
-    #[allow(dead_code)]
     pub fn obstacles(&self) -> &HashSet<Position> {
         &self.obstacles
-    }
-
-    pub fn is_known_obstacle(&self, position: Position) -> bool {
-        self.obstacles.contains(&position)
     }
 
     pub fn remove_resource(&mut self, position: Position) {
@@ -73,10 +78,8 @@ impl LocalKnowledge {
         self.resources.insert(resource.position, resource);
     }
 
-    /// Remplace la connaissance locale par la connaissance agrégée du hub.
-    ///
-    /// C'est volontairement simple :
-    /// le hub est considéré comme la source de vérité pour les ressources connues.
+    /// Replaces local knowledge with the hub's aggregated knowledge, which is
+    /// the source of truth for known resources.
     pub fn replace_with(&mut self, resources: &[KnownResource], obstacles: &[Position]) {
         self.resources = resources
             .iter()
@@ -86,11 +89,7 @@ impl LocalKnowledge {
         self.obstacles = obstacles.iter().copied().collect();
     }
 
-    /// Le robot observe une case.
-    ///
-    /// Cette méthode renvoie :
-    /// - Some(KnownResource) si une ressource nouvelle ou mise à jour est vue ;
-    /// - None sinon.
+    /// Observes a cell. Returns the resource if it is new or updated, else None.
     pub fn observe_resource(&mut self, position: Position, tile: Tile) -> Option<KnownResource> {
         match tile {
             Tile::Resource(resource) => {
@@ -117,28 +116,18 @@ impl LocalKnowledge {
         }
     }
 
-    /// Observe un obstacle et renvoie true s'il s'agit d'une nouvelle information.
+    /// Observes an obstacle; returns true if it is new information.
     pub fn observe_obstacle(&mut self, position: Position, tile: Tile) -> bool {
         matches!(tile, Tile::Obstacle) && self.obstacles.insert(position)
     }
 }
 
-/// Renvoie toutes les positions visibles autour d'un robot.
-///
-/// Rayon 1 = carré 3x3 autour du robot.
-/// Cela représente sa perception locale immédiate.
+/// Positions visible around `center` within a square of the given `radius`,
+/// clamped to the map bounds.
 pub fn visible_positions(center: Position, radius: i32, map: &crate::world::Map) -> Vec<Position> {
-    let mut positions = Vec::new();
-
-    for dy in -radius..=radius {
-        for dx in -radius..=radius {
-            let position = Position::new(center.x + dx, center.y + dy);
-
-            if map.in_bounds(position) {
-                positions.push(position);
-            }
-        }
-    }
-
-    positions
+    (-radius..=radius)
+        .flat_map(|dy| (-radius..=radius).map(move |dx| (dx, dy)))
+        .map(|(dx, dy)| Position::new(center.x + dx, center.y + dy))
+        .filter(|position| map.in_bounds(*position))
+        .collect()
 }

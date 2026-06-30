@@ -1,35 +1,24 @@
-//! Tuile élémentaire de la carte.
+//! Single map cell.
 
 use super::resource::Resource;
 
-/// État d'une case de la grille.
+/// State of a grid cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tile {
-    /// Case libre, traversable.
+    /// Free, walkable cell.
     #[default]
     Empty,
-    /// Obstacle infranchissable — affiché `O` (cyan clair).
+    /// Impassable obstacle, drawn `O` (cyan).
     Obstacle,
-    /// Base centrale — affichée `#` (vert clair).
+    /// Central base, drawn `#` (green).
     Base,
-    /// Ressource collectable posée sur la case.
+    /// Collectable resource sitting on the cell.
     Resource(Resource),
 }
 
 impl Tile {
-    /// Une case est-elle franchissable par un robot ?
+    /// Can a robot walk over this cell?
     pub fn is_walkable(&self) -> bool {
         !matches!(self, Tile::Obstacle)
-    }
-    // #[allow(dead_code)]
-    /// Caractère ASCII utilisé pour le rendu.
-    #[allow(dead_code)]
-    pub fn glyph(&self) -> char {
-        match self {
-            Tile::Empty => '.',
-            Tile::Obstacle => 'O',
-            Tile::Base => '#',
-            Tile::Resource(r) => r.kind.glyph(),
-        }
     }
 }

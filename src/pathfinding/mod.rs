@@ -1,11 +1,11 @@
-//! Navigation A* sur la grille.
+//! A* navigation on the grid.
 //!
-//! Les collectors utilisent ce module pour calculer un chemin vers :
-//! - une ressource connue ;
-//! - la base.
+//! Collectors use this module to compute a path towards:
+//! - a known resource;
+//! - the base.
 //!
-//! On encapsule la crate `pathfinding` derrière des fonctions simples
-//! pour que le reste du code n'ait pas besoin de connaître les détails.
+//! The `pathfinding` crate is wrapped behind simple functions so the rest of
+//! the code does not need to know the details.
 
 use std::collections::HashSet;
 

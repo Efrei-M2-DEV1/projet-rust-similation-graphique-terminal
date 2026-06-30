@@ -1,22 +1,11 @@
-//! Robot collecteur.
+//! Collector robot.
 //!
-//! Responsabilités :
-//! - recevoir les ressources connues depuis le hub ;
-//! - choisir une cible ;
-//! - se déplacer avec A* ;
-//! - demander au hub de collecter une unité ;
-//! - revenir EXACTEMENT à la base pour déposer.
-//!
-//! Correction importante :
-//! - Pour une ressource, le collector peut collecter à courte distance.
-//! - Pour la base, il doit revenir sur la case exacte de la base.
-//!
-//! Cela corrige le blocage observé dans l'Event Log :
-//! "aucun chemin vers (40, 14)".
-//! Sur une carte 80x28, (40,14) est la base.
+//! Receives known resources from the hub, picks a target, navigates with A*,
+//! asks the hub to collect one unit, then returns to the exact base cell to
+//! deposit it.
 
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::{Receiver, Sender};
 
@@ -25,18 +14,14 @@ use crate::robots::common::{CarriedResource, LocalKnowledge};
 use crate::utils::Position;
 use crate::world::{Map, ResourceKind};
 
-/// Capacité fixée à 1 pour respecter strictement l'énoncé :
-/// le collector collecte une unité, puis retourne déposer à la base.
+/// Capacity fixed to 1: collect one unit, then return to deposit it.
 pub const DEFAULT_COLLECTOR_CAPACITY: u32 = 1;
 
-/// Rayon de collecte autour d'une ressource.
-///
-/// Le collector doit s'approcher d'une ressource, mais n'a pas besoin
-/// d'entrer exactement sur la case du gisement.
-/// Cela réduit les blocages autour des ressources.
+/// Collection range around a resource: the collector does not need to stand
+/// exactly on the deposit cell.
 const COLLECTION_RANGE: u32 = 3;
 
-/// Nombre maximal de cases temporairement évitées après des refus de déplacement.
+/// Max number of cells temporarily avoided after move denials.
 const TEMPORARY_BLOCK_LIMIT: usize = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,23 +32,11 @@ pub enum CollectorState {
     ReturningToBase,
 }
 
-impl CollectorState {
-    #[allow(dead_code)]
-    pub const fn label(self) -> &'static str {
-        match self {
-            CollectorState::Waiting => "waiting",
-            CollectorState::MovingToResource => "to resource",
-            CollectorState::Collecting => "collecting",
-            CollectorState::ReturningToBase => "to base",
-        }
-    }
-}
-
 pub struct CollectorRobot {
     id: RobotId,
     position: Position,
     knowledge: LocalKnowledge,
-    map: Arc<Map>,
+    map: Arc<Mutex<Map>>,
     to_hub: Sender<RobotToHub>,
     from_hub: Receiver<HubToRobot>,
     target: Option<Position>,
@@ -79,7 +52,7 @@ impl CollectorRobot {
     pub fn new(
         id: RobotId,
         start: Position,
-        map: Arc<Map>,
+        map: Arc<Mutex<Map>>,
         to_hub: Sender<RobotToHub>,
         from_hub: Receiver<HubToRobot>,
     ) -> Self {
@@ -100,9 +73,7 @@ impl CollectorRobot {
         }
     }
 
-    /// Boucle principale du collecteur.
-    ///
-    /// Elle tourne dans son propre thread.
+    /// Main loop, runs in its own thread.
     pub fn run(mut self) {
         while let Ok(message) = self.from_hub.recv() {
             match message {
@@ -125,7 +96,7 @@ impl CollectorRobot {
                     self.position = to;
                     self.awaiting_move = false;
 
-                    // Un mouvement réussi montre que la situation s'est débloquée.
+                    // A successful move means the situation unblocked.
                     self.temporary_blocked.clear();
                 }
 
@@ -170,7 +141,7 @@ impl CollectorRobot {
                         });
                     }
 
-                    // Capacité = 1 : retour immédiat à la base.
+                    // Capacity = 1: return to base immediately.
                     if self.carried_amount() >= self.capacity {
                         self.state = CollectorState::ReturningToBase;
                         self.target = None;
@@ -202,30 +173,33 @@ impl CollectorRobot {
             return;
         }
 
-        let base = self.map.base();
+        // Lock the shared map once for the whole tick and pass it down to the
+        // read-only helpers. The hub holds the same mutex when it mutates a
+        // resource, so reads and writes never race.
+        let map_handle = Arc::clone(&self.map);
+        let map = map_handle.lock().expect("map mutex poisoned");
+        let base = map.base();
 
-        // CAS 1 : le collector est sur la base avec une cargaison.
-        // Il peut déposer.
+        // CASE 1: on the base with cargo -> deposit.
         if self.position == base && self.has_cargo() {
             self.deposit_at_base();
             return;
         }
 
-        // CAS 2 : le collector transporte quelque chose.
-        // Il doit revenir EXACTEMENT sur la base, pas juste à portée.
+        // CASE 2: carrying something -> return to the exact base cell.
         if self.has_cargo() {
             self.state = CollectorState::ReturningToBase;
-            self.request_move_to_base(base);
+            self.request_move_to_base(&map, base);
             return;
         }
 
-        // CAS 3 : le collector a déjà une cible ressource.
+        // CASE 3: already has a resource target.
         if let Some(target) = self.target {
             if self.is_in_collection_range(target) {
                 self.request_collect(target);
             } else if self.target_is_known(target) {
                 self.state = CollectorState::MovingToResource;
-                self.request_move_towards_resource(target);
+                self.request_move_towards_resource(&map, target);
             } else {
                 self.target = None;
                 self.state = CollectorState::Waiting;
@@ -234,20 +208,17 @@ impl CollectorRobot {
             return;
         }
 
-        // CAS 4 : le collector choisit une nouvelle ressource connue.
-        if let Some(target) = self.choose_target() {
+        // CASE 4: pick a new known resource.
+        if let Some(target) = self.choose_target(&map) {
             self.target = Some(target);
             self.state = CollectorState::MovingToResource;
 
-            self.log(format!(
-                "vise une ressource en ({}, {})",
-                target.x, target.y
-            ));
+            self.log(format!("vise une ressource en ({}, {})", target.x, target.y));
 
             if self.is_in_collection_range(target) {
                 self.request_collect(target);
             } else {
-                self.request_move_towards_resource(target);
+                self.request_move_towards_resource(&map, target);
             }
 
             return;
@@ -256,38 +227,33 @@ impl CollectorRobot {
         self.state = CollectorState::Waiting;
     }
 
-    /// Choisit une ressource.
-    ///
-    /// Les collectors pairs préfèrent l'énergie.
-    /// Les collectors impairs préfèrent les cristaux.
-    fn choose_target(&self) -> Option<Position> {
-        let preferred_kind = self.preferred_kind();
-
-        self.choose_target_for_kind(preferred_kind)
-            .or_else(|| self.choose_any_target())
+    /// Picks a resource: prefer this collector's kind, else any reachable one.
+    fn choose_target(&self, map: &Map) -> Option<Position> {
+        self.choose_target_for_kind(map, self.preferred_kind())
+            .or_else(|| self.choose_any_target(map))
     }
 
-    fn choose_target_for_kind(&self, kind: ResourceKind) -> Option<Position> {
+    fn choose_target_for_kind(&self, map: &Map, kind: ResourceKind) -> Option<Position> {
         self.knowledge
             .resources()
             .values()
             .filter(|resource| resource.quantity > 0)
             .filter(|resource| resource.kind == kind)
             .filter_map(|resource| {
-                self.path_len_to_collection_range(resource.position)
+                self.path_len_to_collection_range(map, resource.position)
                     .map(|path_len| (resource.position, path_len))
             })
             .min_by_key(|(_position, path_len)| *path_len)
             .map(|(position, _)| position)
     }
 
-    fn choose_any_target(&self) -> Option<Position> {
+    fn choose_any_target(&self, map: &Map) -> Option<Position> {
         self.knowledge
             .resources()
             .values()
             .filter(|resource| resource.quantity > 0)
             .filter_map(|resource| {
-                self.path_len_to_collection_range(resource.position)
+                self.path_len_to_collection_range(map, resource.position)
                     .map(|path_len| (resource.position, path_len))
             })
             .min_by_key(|(_position, path_len)| *path_len)
@@ -302,26 +268,29 @@ impl CollectorRobot {
         }
     }
 
-    /// Longueur du meilleur chemin vers une zone de collecte autour d'une ressource.
-    fn path_len_to_collection_range(&self, target: Position) -> Option<usize> {
-        self.collection_positions(target)
+    /// Cells the collector currently avoids when planning: temporary denials
+    /// plus every obstacle it already knows about. This is how the robot stays
+    /// aware of where obstacles are.
+    fn blocked_positions(&self) -> HashSet<Position> {
+        let mut blocked = self.temporary_blocked.clone();
+        blocked.extend(self.knowledge.obstacles().iter().copied());
+        blocked
+    }
+
+    /// Length of the best path to a collection cell around a resource.
+    fn path_len_to_collection_range(&self, map: &Map, target: Position) -> Option<usize> {
+        let blocked = self.blocked_positions();
+        self.collection_positions(map, target)
             .into_iter()
             .filter_map(|goal| {
-                crate::pathfinding::find_path_avoiding(
-                    &self.map,
-                    self.position,
-                    goal,
-                    &self.temporary_blocked,
-                )
-                .map(|path| path.len())
+                crate::pathfinding::find_path_avoiding(map, self.position, goal, &blocked)
+                    .map(|path| path.len())
             })
             .min()
     }
 
-    /// Positions acceptables pour collecter une ressource.
-    ///
-    /// Cette règle ne s'applique PAS à la base.
-    fn collection_positions(&self, target: Position) -> Vec<Position> {
+    /// Cells from which the collector may collect a resource (not the base).
+    fn collection_positions(&self, map: &Map, target: Position) -> Vec<Position> {
         let mut positions = Vec::new();
         let radius = COLLECTION_RANGE as i32;
 
@@ -329,7 +298,7 @@ impl CollectorRobot {
             for dx in -radius..=radius {
                 let position = Position::new(target.x + dx, target.y + dy);
 
-                if !self.map.in_bounds(position) {
+                if !map.in_bounds(position) {
                     continue;
                 }
 
@@ -337,7 +306,7 @@ impl CollectorRobot {
                     continue;
                 }
 
-                if self.map.is_walkable(position) {
+                if map.is_walkable(position) {
                     positions.push(position);
                 }
             }
@@ -358,11 +327,9 @@ impl CollectorRobot {
         self.position.manhattan(target) <= COLLECTION_RANGE
     }
 
-    /// Mouvement vers une ressource.
-    ///
-    /// Ici, on va vers une position à portée de collecte.
-    fn request_move_towards_resource(&mut self, target: Position) {
-        let Some(goal) = self.best_collection_goal(target) else {
+    /// Moves towards a collection cell within range of the resource.
+    fn request_move_towards_resource(&mut self, map: &Map, target: Position) {
+        let Some(goal) = self.best_collection_goal(map, target) else {
             self.log(format!(
                 "aucun point de collecte vers ({}, {})",
                 target.x, target.y
@@ -378,7 +345,7 @@ impl CollectorRobot {
             return;
         }
 
-        let Some(next) = self.next_step_to(goal) else {
+        let Some(next) = self.next_step_to(map, goal) else {
             self.log(format!(
                 "aucun chemin vers ressource ({}, {})",
                 target.x, target.y
@@ -392,24 +359,20 @@ impl CollectorRobot {
         self.request_move(next);
     }
 
-    /// Mouvement vers la base.
-    ///
-    /// Ici, contrairement aux ressources, on doit atteindre la case exacte
-    /// de la base pour déposer.
-    fn request_move_to_base(&mut self, base: Position) {
+    /// Moves towards the exact base cell (required to deposit).
+    fn request_move_to_base(&mut self, map: &Map, base: Position) {
         if self.position == base {
             self.deposit_at_base();
             return;
         }
 
-        let Some(next) = self.next_step_to_exact(base) else {
+        let Some(next) = self.next_step_to(map, base) else {
             self.log(format!(
                 "chemin exact vers base introuvable ({}, {})",
                 base.x, base.y
             ));
 
-            // Sécurité : si les blocages temporaires empêchent le retour,
-            // on les oublie. La base doit toujours rester prioritaire.
+            // The base must always stay reachable: forget temporary blocks.
             self.temporary_blocked.clear();
             return;
         };
@@ -427,60 +390,40 @@ impl CollectorRobot {
         });
     }
 
-    fn best_collection_goal(&self, target: Position) -> Option<Position> {
-        self.collection_positions(target)
+    fn best_collection_goal(&self, map: &Map, target: Position) -> Option<Position> {
+        let blocked = self.blocked_positions();
+        self.collection_positions(map, target)
             .into_iter()
             .filter_map(|goal| {
-                crate::pathfinding::find_path_avoiding(
-                    &self.map,
-                    self.position,
-                    goal,
-                    &self.temporary_blocked,
-                )
-                .map(|path| (goal, path.len()))
+                crate::pathfinding::find_path_avoiding(map, self.position, goal, &blocked)
+                    .map(|path| (goal, path.len()))
             })
             .min_by_key(|(_goal, path_len)| *path_len)
             .map(|(goal, _)| goal)
     }
 
-    /// Prochain pas vers un objectif quelconque en utilisant les blocages temporaires.
-    fn next_step_to(&mut self, goal: Position) -> Option<Position> {
+    /// Next step towards a goal, avoiding known obstacles and temporary denials.
+    fn next_step_to(&mut self, map: &Map, goal: Position) -> Option<Position> {
         if self.position == goal {
             return None;
         }
 
-        if let Some(next) = crate::pathfinding::next_step_avoiding(
-            &self.map,
-            self.position,
-            goal,
-            &self.temporary_blocked,
-        ) {
+        let blocked = self.blocked_positions();
+        if let Some(next) =
+            crate::pathfinding::next_step_avoiding(map, self.position, goal, &blocked)
+        {
             return Some(next);
         }
 
-        // Si les blocages temporaires empêchent le chemin,
-        // on les nettoie et on retente sans eux.
+        // If temporary denials sealed the path, drop them and retry using only
+        // the known obstacles.
         if !self.temporary_blocked.is_empty() {
             self.temporary_blocked.clear();
-
-            let empty_blocked = HashSet::new();
-
-            return crate::pathfinding::next_step_avoiding(
-                &self.map,
-                self.position,
-                goal,
-                &empty_blocked,
-            );
+            let blocked = self.blocked_positions();
+            return crate::pathfinding::next_step_avoiding(map, self.position, goal, &blocked);
         }
 
         None
-    }
-
-    /// Prochain pas vers une case exacte.
-    ///
-    /// Utilisé surtout pour revenir à la base.
-    fn next_step_to_exact(&mut self, goal: Position) -> Option<Position> {
-        self.next_step_to(goal)
     }
 
     fn request_collect(&mut self, position: Position) {

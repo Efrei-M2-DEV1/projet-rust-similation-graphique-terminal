@@ -1,14 +1,7 @@
-//! Module `world`.
+//! `world` module.
 //!
-//! Il regroupe tout ce qui décrit la carte de simulation :
-//! - la génération procédurale ;
-//! - le placement des ressources ;
-//! - les tuiles ;
-//! - les ressources ;
-//! - la structure Map.
-//!
-//! On ne réexporte ici que les types réellement utilisés par le reste du projet,
-//! afin d'éviter les imports inutilisés et de garder une API claire.
+//! Everything that describes the simulation map: procedural generation,
+//! resource placement, tiles, resources and the `Map` struct.
 
 pub mod generator;
 pub mod map;
