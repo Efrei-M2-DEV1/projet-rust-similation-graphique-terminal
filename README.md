@@ -48,7 +48,7 @@ L’interface terminal affiche en temps réel :
 | Langage                    | Rust 2021                   |
 | Interface terminal         | Ratatui                     |
 | Gestion terminal / clavier | Crossterm                   |
-| Concurrence                | `std::thread`               |
+| Concurrence                | `std::thread` + `Arc<Mutex<Map>>` |
 | Communication              | `crossbeam-channel`         |
 | Génération procédurale     | `noise`                     |
 | Aléatoire déterministe     | `rand`                      |
@@ -274,13 +274,13 @@ L’architecture est conçue pour être **sûre par construction** : le compilat
 
 | Risque                 | Comment il est évité                                                                                   |
 | ---------------------- | ------------------------------------------------------------------------------------------------------ |
-| Accès concurrent carte | La carte est partagée en lecture seule via `Arc<Map>`. Les obstacles ne changent jamais → aucun verrou nécessaire. |
-| Modification de l’état | Seul le **hub** possède l’état mutable (ressources, compteurs, positions). Les robots ne le modifient jamais directement. |
+| Accès concurrent carte | La carte est partagée via `Arc<Mutex<Map>>`. Chaque thread verrouille la map brièvement : les robots la lisent, le hub écrit. Le compilateur empêche tout accès hors du verrou. |
+| Modification de l’état | Seul le **hub** écrit dans la map (retrait d’une unité de ressource via `take_resource_unit`) et possède les compteurs et positions. C’est l’**écrivain unique** ; les robots ne font que lire. |
 | Collisions de robots   | Tout déplacement est **validé par le hub** (`MoveGranted` / `MoveDenied`) : deux robots ne peuvent pas occuper la même case. |
-| Blocages (deadlocks)   | Aucun `Mutex` partagé entre robots. La communication se fait uniquement par **channels** `crossbeam`.   |
+| Blocages (deadlocks)   | Un seul `Mutex` (la map), jamais conservé pendant un envoi sur un channel ni imbriqué avec un autre verrou. Les sections critiques sont courtes → pas d’interblocage. |
 | Opérations bloquantes  | Le hub lit les messages avec `try_recv` (non-bloquant) ; il ne reste jamais bloqué en attente d’un robot lent. |
 
-En résumé : les robots **demandent**, le hub **décide**. Cette séparation supprime tout accès concurrent à un état partagé mutable, ce qui rend les data races impossibles sans recourir à des verrous coûteux.
+En résumé : les robots **lisent et demandent**, le hub **décide et écrit**. La map est protégée par un mutex (modèle plusieurs-lecteurs / un-écrivain), tandis que tout le reste de l’état mutable appartient au hub et transite par des channels — ce qui rend les data races impossibles.
 
 ---
 
